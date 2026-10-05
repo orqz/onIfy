@@ -28,6 +28,7 @@ use crate::settings::Settings;
 use crate::spotify::{self, Engine, Event, NowPlaying};
 use crate::{images, rt};
 use backdrop::Backdrop;
+use glass::{Glass, GlassHost};
 use cover::Cover;
 use pages::{HomePage, Loaded, SearchPage};
 use player_bar::PlayerBar;
@@ -180,7 +181,7 @@ pub fn activate(app: &adw::Application) {
     nav.add(&search.page);
     nav.replace_with_tags(&["home"]);
     let content = adw::NavigationPage::builder().title("onIfy").child(&nav).build();
-    let (sidebar_page, sidebar) = build_sidebar();
+    let (sidebar_page, sidebar, sidebar_glass) = build_sidebar();
     let split = adw::NavigationSplitView::builder()
         .sidebar(&sidebar_page)
         .content(&content)
@@ -189,25 +190,25 @@ pub fn activate(app: &adw::Application) {
         .sidebar_width_fraction(0.22)
         .build();
     let bar = PlayerBar::new();
-    let main = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
-    split.set_vexpand(true);
-    main.append(&split);
-    main.append(&bar.widget);
 
     let root = gtk::Stack::builder()
         .transition_type(gtk::StackTransitionType::Crossfade)
         .transition_duration(200)
         .build();
     root.add_named(&login.widget, Some("login"));
-    root.add_named(&main, Some("main"));
-    // The blurred cover sits underneath everything; the UI floats over it.
+    root.add_named(&split, Some("main"));
+    // The blurred cover sits underneath everything, the pages scroll over it,
+    // and the player floats on glass above both.
     let backdrop = Backdrop::new();
-    let layers = gtk::Overlay::new();
-    layers.set_child(Some(&backdrop));
-    layers.add_overlay(&root);
-    layers.set_measure_overlay(&root, true);
+    let host = GlassHost::new(&backdrop, &root, &bar.widget);
+    host.add_panel(&sidebar_glass);
+    root.connect_visible_child_name_notify(glib::clone!(
+        #[weak(rename_to = bar)]
+        bar.widget,
+        move |root| bar.set_visible(root.visible_child_name().as_deref() == Some("main"))
+    ));
     let toasts = adw::ToastOverlay::new();
-    toasts.set_child(Some(&layers));
+    toasts.set_child(Some(&host));
     window.set_content(Some(&toasts));
 
     let narrow = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 760sp").unwrap());
@@ -412,7 +413,7 @@ fn library_row(card: &Card) -> gtk::ListBoxRow {
     row
 }
 
-fn build_sidebar() -> (adw::NavigationPage, gtk::ListBox) {
+fn build_sidebar() -> (adw::NavigationPage, gtk::ListBox, Glass) {
     let list = gtk::ListBox::new();
     list.add_css_class("navigation-sidebar");
     list.append(&nav_row("onify-go-home-symbolic", "Home"));
@@ -458,9 +459,15 @@ fn build_sidebar() -> (adw::NavigationPage, gtk::ListBox) {
         .child(&list)
         .build();
     toolbar.set_content(Some(&scroller));
-    let page = adw::NavigationPage::builder().title("onIfy").child(&toolbar).build();
+    toolbar.set_vexpand(true);
+    // A floating glass panel; rows scroll inside its rounded corners.
+    let glass = Glass::new(gtk::Orientation::Vertical, 0, 24.0);
+    glass.add_css_class("sidebar-glass");
+    glass.set_overflow(gtk::Overflow::Hidden);
+    glass.append(&toolbar);
+    let page = adw::NavigationPage::builder().title("onIfy").child(&glass).build();
     page.add_css_class("sidebar");
-    (page, list)
+    (page, list, glass)
 }
 
 fn fill_sidebar(playlists: &[Card]) {
@@ -880,6 +887,22 @@ fn install_actions(app: &adw::Application) {
         app.add_action(&a);
     };
     with_string("open", open_uri);
+    // Developer aid: with ONIFY_DEV set, `app.dev-render` saves the window as a
+    // PNG at 2x, even while it's on another workspace.
+    if std::env::var_os("ONIFY_DEV").is_some() {
+        with_string("dev-render", |path| {
+            let window = ctx().window.clone();
+            let (w, h) = (window.width() as f32, window.height() as f32);
+            let snapshot = gtk::Snapshot::new();
+            snapshot.scale(2.0, 2.0);
+            gtk::WidgetPaintable::new(Some(&window)).snapshot(&snapshot, w as f64, h as f64);
+            let (Some(node), Some(renderer)) = (snapshot.to_node(), window.renderer()) else { return };
+            let viewport = gtk::graphene::Rect::new(0.0, 0.0, w * 2.0, h * 2.0);
+            if let Err(e) = renderer.render_texture(&node, Some(&viewport)).save_to_png(path) {
+                log::warn!("dev-render failed: {e}");
+            }
+        });
+    }
     with_string("copy-text", |text| {
         ctx().window.clipboard().set_text(text);
         toast("Link copied");

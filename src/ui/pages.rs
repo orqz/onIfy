@@ -15,6 +15,9 @@ use crate::rt;
 
 /// Horizontal page margin; everything lines up on it.
 const GUTTER: i32 = 36;
+/// Room under each page so its end can scroll clear of the floating player
+/// (capsule plus its margins; see `glass.player-bar` in style.css).
+const BAR_CLEARANCE: i32 = 116;
 
 fn label(text: &str, classes: &[&str]) -> gtk::Label {
     let label = gtk::Label::builder()
@@ -268,7 +271,7 @@ impl HomePage {
     pub fn new() -> Self {
         let body = vbox(40);
         body.set_margin_top(8);
-        body.set_margin_bottom(40);
+        body.set_margin_bottom(BAR_CLEARANCE);
         let title = label(greeting(), &["title-hero"]);
         title.set_margin_start(GUTTER);
         body.append(&title);
@@ -331,7 +334,7 @@ impl SearchPage {
             .build();
         let results = vbox(40);
         results.set_margin_top(12);
-        results.set_margin_bottom(40);
+        results.set_margin_bottom(BAR_CLEARANCE);
         let nothing = adw::StatusPage::builder()
             .icon_name("onify-system-search-symbolic")
             .title("No results")
@@ -693,7 +696,7 @@ pub fn tracks_page(kind: Kind, uri: &str, title: &str, images: &Images) -> adw::
 
 pub fn artist_page(card: &Card) -> adw::NavigationPage {
     let body = vbox(40);
-    body.set_margin_bottom(40);
+    body.set_margin_bottom(BAR_CLEARANCE);
 
     let avatar = Cover::round(212);
     avatar.set_url(card.images.pick(480));

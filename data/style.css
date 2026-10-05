@@ -235,7 +235,7 @@ list.tracks {
 }
 
 listview.tracks {
-  padding-bottom: 28px;
+  padding-bottom: 116px;
 }
 
 listview.tracks > row,
@@ -394,10 +394,20 @@ entry.search-pill:focus-within {
 
 /* ---------- Player capsule (the glass itself is drawn in code) ---------- */
 
+/* Floats over the pages. 10px all round the 60px cover (GTK's min-height
+   excludes padding, so the capsule is 80px); the right side has no artwork,
+   so it gets a little more room. Height plus margins = 104px, which
+   BAR_CLEARANCE in pages.rs and the sidebar's bottom margin follow. */
 glass.player-bar {
-  margin: 0 14px 14px 14px;
-  padding: 10px 20px 10px 10px;
-  min-height: 76px;
+  margin: 0 12px 12px 12px;
+  padding: 10px 18px 10px 10px;
+  min-height: 60px;
+}
+
+/* The sidebar is a floating glass panel too, ending above the player. */
+glass.sidebar-glass {
+  margin: 12px 12px 104px 12px;
+  border-radius: 24px;
 }
 
 .now-title {
@@ -422,8 +432,8 @@ glass.player-bar {
 }
 
 button.play-button {
-  min-width: 42px;
-  min-height: 42px;
+  min-width: 40px;
+  min-height: 40px;
   padding: 0;
   background-color: #ffffff;
   color: #0b0b0b;
@@ -440,8 +450,8 @@ button.play-button:active {
 }
 
 .player-bar button.flat {
-  min-width: 34px;
-  min-height: 34px;
+  min-width: 32px;
+  min-height: 32px;
   color: rgba(255, 255, 255, 0.75);
 }
 
@@ -456,6 +466,10 @@ button.play-button:active {
 
 scale.progress {
   padding: 6px 0;
+}
+
+.player-bar scale.progress {
+  padding: 3px 0;
 }
 
 scale.progress trough {

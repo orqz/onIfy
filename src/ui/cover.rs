@@ -41,8 +41,11 @@ mod imp {
         }
 
         fn snapshot(&self, snapshot: &gtk::Snapshot) {
+            // Always a centred square, however much room the parent gives.
             let widget = self.obj();
-            let bounds = graphene::Rect::new(0.0, 0.0, widget.width() as f32, widget.height() as f32);
+            let (w, h) = (widget.width() as f32, widget.height() as f32);
+            let side = w.min(h);
+            let bounds = graphene::Rect::new((w - side) / 2.0, (h - side) / 2.0, side, side);
             let radius = self.radius.get().min(bounds.width() / 2.0);
             snapshot.push_rounded_clip(&gsk::RoundedRect::from_rect(bounds, radius));
             let opacity = self.opacity.get();

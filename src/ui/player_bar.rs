@@ -57,6 +57,9 @@ pub struct PlayerBar {
     dragging: Cell<bool>,
 }
 
+/// The cover fills the capsule's height inside its padding (see style.css).
+const COVER: i32 = 60;
+
 fn icon_button(icon: &str, tooltip: &str) -> gtk::Button {
     let button = gtk::Button::from_icon_name(icon);
     button.set_tooltip_text(Some(tooltip));
@@ -73,14 +76,15 @@ fn now_us() -> i64 {
 impl PlayerBar {
     pub fn new() -> Rc<Self> {
         // Three equal columns, like Spotify: the controls stay centred no
-        // matter how long the song title is.
-        let widget = Glass::new(gtk::Orientation::Horizontal, 16, 26.0);
+        // matter how long the song title is. Corners are concentric: the
+        // capsule's 28px radius minus its 10px padding is the cover's 18px.
+        let widget = Glass::new(gtk::Orientation::Horizontal, 16, 28.0);
         widget.set_homogeneous(true);
         widget.add_css_class("player-bar");
 
         // Left: what's playing.
         let side_start = gtk::Box::builder().spacing(14).build();
-        let cover = Cover::new(56, 12.0);
+        let cover = Cover::new(COVER, 18.0);
         cover.set_cursor_from_name(Some("pointer"));
         let text = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
@@ -108,10 +112,9 @@ impl PlayerBar {
         // Center: transport and progress.
         let center = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
-            .spacing(2)
             .valign(gtk::Align::Center)
             .build();
-        let buttons = gtk::Box::builder().spacing(10).halign(gtk::Align::Center).build();
+        let buttons = gtk::Box::builder().spacing(8).halign(gtk::Align::Center).build();
         let shuffle = icon_button("onify-media-playlist-shuffle-symbolic", "Shuffle");
         let prev = icon_button("onify-media-skip-backward-symbolic", "Previous");
         let play = gtk::Button::from_icon_name("onify-media-playback-start-symbolic");

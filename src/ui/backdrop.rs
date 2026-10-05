@@ -87,9 +87,9 @@ mod imp {
                 &graphene::Point::new(0.0, 0.0),
                 &graphene::Point::new(0.0, h),
                 &[
-                    gsk::ColorStop::new(0.0, black(0.30)),
-                    gsk::ColorStop::new(0.5, black(0.48)),
-                    gsk::ColorStop::new(1.0, black(0.72)),
+                    gsk::ColorStop::new(0.0, black(0.20)),
+                    gsk::ColorStop::new(0.5, black(0.34)),
+                    gsk::ColorStop::new(1.0, black(0.58)),
                 ],
             );
             // Vignette.
@@ -102,7 +102,7 @@ mod imp {
                 1.0,
                 &[
                     gsk::ColorStop::new(0.55, black(0.0)),
-                    gsk::ColorStop::new(1.0, black(0.45)),
+                    gsk::ColorStop::new(1.0, black(0.38)),
                 ],
             );
             // Fine grain keeps the huge soft gradients from banding.
