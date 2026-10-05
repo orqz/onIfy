@@ -244,11 +244,13 @@ impl TrackRow {
         for artist in track.artists.iter().filter(|a| !a.uri.is_empty()).take(3) {
             add(&format!("Go to {}", artist.name), "app.open", &artist.uri);
         }
-        add(
-            "Copy Song Link",
-            "app.copy-text",
-            &format!("https://open.spotify.com/track/{}", id_of(&track.uri)),
-        );
+        if track.uri.starts_with("spotify:track:") {
+            add(
+                "Copy Song Link",
+                "app.copy-text",
+                &format!("https://open.spotify.com/track/{}", id_of(&track.uri)),
+            );
+        }
 
         let popover = self.imp().menu.get_or_init(|| {
             let popover = gtk::PopoverMenu::from_model(None::<&gio::MenuModel>);

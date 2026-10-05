@@ -113,6 +113,38 @@ impl Track {
         join_names(&self.artists)
     }
 
+    /// A local file in a playlist. Its URI carries everything:
+    /// `spotify:local:{artist}:{album}:{title}:{seconds}`, each part form-encoded.
+    fn from_local_uri(uri: &str) -> Option<Self> {
+        let decode = |part: &str| -> String {
+            url::form_urlencoded::parse(part.as_bytes())
+                .next()
+                .map(|(k, _)| k.into_owned())
+                .unwrap_or_default()
+        };
+        let parts: Vec<&str> = uri.strip_prefix("spotify:local:")?.split(':').collect();
+        let [artist, album, title, seconds] = parts.as_slice() else { return None };
+        let artist = decode(artist);
+        Some(Self {
+            uri: uri.to_owned(),
+            name: decode(title),
+            artists: [artist]
+                .into_iter()
+                .filter(|a| !a.is_empty())
+                .map(|name| Named { name, uri: String::new() })
+                .collect(),
+            album: Named {
+                name: decode(album),
+                uri: String::new(),
+            },
+            images: Images::default(),
+            duration_ms: seconds.parse::<u32>().unwrap_or(0).saturating_mul(1000),
+            explicit: false,
+            playable: true,
+            number: 0,
+        })
+    }
+
     /// Parses a `Track`, or a `TrackResponseWrapper` around one.
     fn parse(v: &Value, album: Option<(&Named, &Images)>) -> Option<Self> {
         let (t, wrapper_uri) = if v.get("data").is_some() {
@@ -120,10 +152,21 @@ impl Track {
         } else {
             (v, None)
         };
-        if t.is_null() || t["__typename"].as_str().is_some_and(|k| k != "Track") {
+        if t.is_null() {
             return None;
         }
+        let kind = t["__typename"].as_str();
         let uri = t["uri"].as_str().or(wrapper_uri)?.to_owned();
+        if kind == Some("LocalTrack") || uri.starts_with("spotify:local:") {
+            let mut track = Self::from_local_uri(&uri)?;
+            if let Some(name) = t["name"].as_str().filter(|n| !n.is_empty()) {
+                track.name = name.to_owned();
+            }
+            return Some(track);
+        }
+        if kind.is_some_and(|k| k != "Track") {
+            return None;
+        }
         let (album, images) = match album {
             Some((a, i)) => (a.clone(), i.clone()),
             None => (

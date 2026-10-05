@@ -64,13 +64,20 @@ fn probe(path: &Path, ext: &str) -> Option<Track> {
         .format(&hint, source, &FormatOptions::default(), &MetadataOptions::default())
         .ok()?;
 
-    // Same precedence as librespot: container tags, else tags found while probing.
-    let mut tags = probed.format.metadata().skip_to_latest().map(|r| r.tags().to_vec());
-    if tags.as_ref().is_none_or(Vec::is_empty) {
-        tags = probed.metadata.get().and_then(|mut m| m.skip_to_latest().map(|r| r.tags().to_vec()));
-    }
+    // Same as librespot: container tags, else tags found while probing. Files
+    // with no tags at all are skipped, because librespot can't play them.
+    let tags = {
+        let mut metadata = probed.format.metadata();
+        if metadata.current().is_none() {
+            if let Some(probe_metadata) = probed.metadata.get() {
+                metadata = probe_metadata;
+            }
+        }
+        metadata.skip_to_latest();
+        metadata.current()?.tags().to_vec()
+    };
     let (mut artist, mut album, mut title, mut number) = (None, None, None, 0);
-    for tag in tags.unwrap_or_default() {
+    for tag in tags {
         match tag.std_key {
             Some(StandardTagKey::Artist) => artist = Some(tag.value.to_string()),
             Some(StandardTagKey::Album) => album = Some(tag.value.to_string()),

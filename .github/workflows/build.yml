@@ -1,0 +1,83 @@
+name: Build
+
+on:
+    push:
+        branches: [main]
+        tags: ["v*"]
+    pull_request:
+    workflow_dispatch:
+
+concurrency:
+    group: ${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
+
+permissions:
+    contents: read
+
+# onIfy needs GTK 4.20 and libadwaita 1.8, newer than Ubuntu ships, so every
+# platform builds against a rolling GTK: Arch, MSYS2 and Homebrew.
+jobs:
+    linux:
+        name: Linux
+        runs-on: ubuntu-latest
+        container: archlinux:latest
+        steps:
+            - name: Install Rust and GTK
+              run: pacman -Syu --noconfirm --needed base-devel git rust gtk4 libadwaita libpulse
+
+            - uses: actions/checkout@v5
+
+            - uses: Swatinem/rust-cache@v2
+
+            - run: cargo build --release --locked
+
+            - uses: actions/upload-artifact@v4
+              with:
+                  name: onIfy-linux-x86_64
+                  path: target/release/onify
+
+    windows:
+        name: Windows
+        runs-on: windows-latest
+        defaults:
+            run:
+                shell: msys2 {0}
+        steps:
+            - uses: msys2/setup-msys2@v2
+              with:
+                  msystem: UCRT64
+                  update: true
+                  install: git
+                  pacboy: >-
+                      rust:p
+                      gcc:p
+                      pkgconf:p
+                      gtk4:p
+                      libadwaita:p
+
+            - uses: actions/checkout@v5
+
+            - run: cargo build --release --locked
+
+            - uses: actions/upload-artifact@v4
+              with:
+                  name: onIfy-windows-x86_64
+                  path: target/release/onify.exe
+
+    macos:
+        name: macOS
+        runs-on: macos-latest # Apple Silicon
+        steps:
+            - uses: actions/checkout@v5
+
+            - name: Install GTK
+              run: brew install gtk4 libadwaita pkgconf
+
+            - uses: Swatinem/rust-cache@v2
+
+            - run: cargo build --release --locked
+
+            - uses: actions/upload-artifact@v4
+              with:
+                  name: onIfy-macos-arm64
+                  path: target/release/onify
