@@ -87,6 +87,7 @@ pub struct Ctx {
     /// The local folders changed while music played; restart the engine at
     /// the next pause so it picks them up.
     engine_stale: Cell<bool>,
+    last_unavailable: Cell<Option<std::time::Instant>>,
     #[cfg(target_os = "linux")]
     mpris: RefCell<Option<Rc<mpris_server::Player>>>,
     now: RefCell<Option<NowPlaying>>,
@@ -244,6 +245,7 @@ pub fn activate(app: &adw::Application) {
         settings: RefCell::new(settings),
         save_pending: Cell::new(false),
         engine_stale: Cell::new(false),
+        last_unavailable: Cell::default(),
         #[cfg(target_os = "linux")]
         mpris: RefCell::default(),
         now: RefCell::default(),
@@ -806,7 +808,14 @@ fn handle_event(event: Event) {
             }
             integrations::volume(volume);
         }
-        Event::Unavailable => toast("This song isn't available"),
+        Event::Unavailable => {
+            // librespot skips through every song it can't play; say so once.
+            let now = std::time::Instant::now();
+            if ctx.last_unavailable.get().is_none_or(|t| now.duration_since(t) > Duration::from_secs(5)) {
+                toast("This song isn't available");
+            }
+            ctx.last_unavailable.set(Some(now));
+        }
         Event::Disconnected(generation) => {
             if generation == ctx.generation.get() {
                 ctx.engine.take();

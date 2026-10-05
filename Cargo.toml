@@ -39,6 +39,11 @@ souvlaki = "0.8"
 [target.'cfg(windows)'.dependencies]
 gdk4-win32 = "0.11"
 
+# librespot's decoder only plays 44.1 kHz local files; this copy resamples
+# the rest (see vendor/librespot-playback/src/decoder/resampler.rs).
+[patch.crates-io]
+librespot-playback = { path = "vendor/librespot-playback" }
+
 [build-dependencies]
 glib-build-tools = "0.22"
 

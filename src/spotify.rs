@@ -95,6 +95,8 @@ pub struct NowPlaying {
 
 impl NowPlaying {
     fn from_item(item: AudioItem) -> Self {
+        // Untagged local files go by their file name, as in the Local Files list.
+        let mut file_name = None;
         let (artists, album) = match item.unique_fields {
             UniqueFields::Track { artists, album, .. } => (
                 artists
@@ -113,23 +115,29 @@ impl NowPlaying {
                 }],
                 String::new(),
             ),
-            UniqueFields::Local { artists, album, .. } => (
-                artists
-                    .map(|name| Named {
-                        name,
-                        uri: String::new(),
-                    })
-                    .into_iter()
-                    .collect(),
-                album.unwrap_or_default(),
-            ),
+            UniqueFields::Local { artists, album, path, .. } => {
+                file_name = path.file_stem().map(|s| s.to_string_lossy().into_owned());
+                (
+                    artists
+                        .map(|name| Named {
+                            name,
+                            uri: String::new(),
+                        })
+                        .into_iter()
+                        .collect(),
+                    album.unwrap_or_default(),
+                )
+            }
         };
         let mut covers: Vec<(String, i32)> =
             item.covers.into_iter().map(|c| (c.url, c.width)).collect();
         covers.sort_by_key(|c| c.1);
         Self {
             uri: item.uri,
-            name: item.name,
+            name: match file_name {
+                Some(file_name) if item.name.is_empty() => file_name,
+                _ => item.name,
+            },
             artists,
             album,
             duration_ms: item.duration_ms,
