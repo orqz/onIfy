@@ -98,6 +98,9 @@ pub struct Ctx {
     now: RefCell<Option<NowPlaying>>,
     /// A link to open once the library has loaded.
     pending_link: RefCell<Option<String>>,
+    /// What the sidebar and Home show, to skip redrawing identical data.
+    shown_library: RefCell<Option<Vec<Card>>>,
+    shown_home: RefCell<Option<crate::api::Home>>,
 }
 
 thread_local! {
@@ -275,6 +278,8 @@ pub fn activate(app: &adw::Application) {
         mpris: RefCell::default(),
         now: RefCell::default(),
         pending_link: RefCell::default(),
+        shown_library: RefCell::default(),
+        shown_home: RefCell::default(),
     });
     CTX.with(|c| {
         let _ = c.set(ctx.clone());
@@ -315,6 +320,7 @@ pub fn activate(app: &adw::Application) {
     match spotify::cached_credentials() {
         Some(credentials) => {
             ctx.root.set_visible_child_name("main");
+            show_cached_library();
             connect(credentials);
         }
         None => ctx.root.set_visible_child_name("login"),
@@ -762,40 +768,46 @@ fn restart_if_stale() {
     glib::timeout_add_local_once(Duration::from_millis(300), move || connect(credentials));
 }
 
+/// Last time's library and Home from disk, the moment the window opens:
+/// connecting to Spotify takes a few seconds.
+fn show_cached_library() {
+    spawn_local(async {
+        let cached = Api::cache_only();
+        let (library, home) = rt::spawn(async move { tokio::join!(cached.library(), cached.home()) }).await;
+        let ctx = ctx();
+        if let Ok(library) = library {
+            if ctx.shown_library.borrow().is_none() {
+                fill_sidebar(&library);
+                ctx.shown_library.replace(Some(library));
+            }
+        }
+        if let Ok(home) = home {
+            if ctx.shown_home.borrow().is_none() {
+                ctx.home.fill(&home);
+                ctx.shown_home.replace(Some(home));
+            }
+        }
+    });
+}
+
+/// Spotify's current library and Home, redrawn only where they changed.
 fn load_library() {
     let Some(api) = ctx().api() else { return };
     if !api.is_premium() {
         toast("Playback needs Spotify Premium");
     }
     spawn_local(async move {
-        // Last time's library and Home straight from disk, then Spotify's
-        // current ones, redrawn only if they changed.
-        let offline = api.offline();
-        let (library, home) = rt::spawn(async move { tokio::join!(offline.library(), offline.home()) }).await;
-        let ctx = ctx();
-        let shown_library = library.ok();
-        let shown_home = home.ok();
-        if let Some(library) = &shown_library {
-            fill_sidebar(library);
-        }
-        if let Some(home) = &shown_home {
-            ctx.home.fill(home);
-        }
-        if shown_library.is_some() {
-            if let Some(link) = ctx.pending_link.take() {
-                open_link(&link);
-            }
-        }
-
         let (library, home) = rt::spawn(async move { tokio::join!(api.library(), api.home()) }).await;
-        let ctx = self::ctx();
+        let ctx = ctx();
         match library {
             Ok(library) => {
-                if shown_library.as_deref().is_none_or(|shown| !same_cards(shown, &library)) {
+                let same = ctx.shown_library.borrow().as_deref().is_some_and(|shown| same_cards(shown, &library));
+                if !same {
                     fill_sidebar(&library);
                 }
+                ctx.shown_library.replace(Some(library));
             }
-            Err(e) if shown_library.is_none() => toast(&format!("Couldn't load your library: {e}")),
+            Err(e) if ctx.shown_library.borrow().is_none() => toast(&format!("Couldn't load your library: {e}")),
             Err(_) => {}
         }
         if let Some(link) = ctx.pending_link.take() {
@@ -803,15 +815,16 @@ fn load_library() {
         }
         match home {
             Ok(home) => {
-                let changed = shown_home.as_ref().is_none_or(|shown| {
-                    shown.sections.len() != home.sections.len()
-                        || shown.sections.iter().zip(&home.sections).any(|(a, b)| a.0 != b.0 || !same_cards(&a.1, &b.1))
+                let same = ctx.shown_home.borrow().as_ref().is_some_and(|shown| {
+                    shown.sections.len() == home.sections.len()
+                        && shown.sections.iter().zip(&home.sections).all(|(a, b)| a.0 == b.0 && same_cards(&a.1, &b.1))
                 });
-                if changed {
+                if !same {
                     ctx.home.fill(&home);
                 }
+                ctx.shown_home.replace(Some(home));
             }
-            Err(e) if shown_home.is_none() => {
+            Err(e) if ctx.shown_home.borrow().is_none() => {
                 ctx.home.fill(&Default::default());
                 toast(&format!("Couldn't load Home: {e}"));
             }
@@ -834,6 +847,8 @@ fn logout() {
     }
     ctx.api.take();
     ctx.stores.borrow_mut().clear();
+    ctx.shown_library.take();
+    ctx.shown_home.take();
     fill_sidebar(&[]);
     spotify::forget_credentials();
     navigate(Route::Home, true);

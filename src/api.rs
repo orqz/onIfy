@@ -348,25 +348,31 @@ fn cache_file(operation: &str, variables: &Value) -> std::path::PathBuf {
 
 #[derive(Clone)]
 pub struct Api {
-    session: Session,
+    /// `None` for `cache_only`, before Spotify has connected.
+    session: Option<Session>,
     /// Answer from the disk cache only, never the network.
     offline: bool,
 }
 
 impl Api {
     pub fn new(session: Session) -> Self {
-        Self { session, offline: false }
+        Self { session: Some(session), offline: false }
     }
 
-    /// The same API answering from what was saved last time, instantly and
-    /// without the network. Anything not saved fails with "not cached".
-    pub fn offline(&self) -> Self {
-        Self { session: self.session.clone(), offline: true }
+    /// Answers from what was saved last time, instantly and without the
+    /// network, even before Spotify has connected. Anything not saved fails
+    /// with "not cached".
+    pub fn cache_only() -> Self {
+        Self { session: None, offline: true }
+    }
+
+    fn session(&self) -> Result<&Session> {
+        self.session.as_ref().ok_or_else(|| "not connected".to_owned())
     }
 
     async fn get_text(&self, url: &str) -> Result<String> {
         let request = Request::get(url).body(Bytes::new()).map_err(|e| e.to_string())?;
-        let body = self.session.http_client().request_body(request).await.map_err(|e| e.to_string())?;
+        let body = self.session()?.http_client().request_body(request).await.map_err(|e| e.to_string())?;
         String::from_utf8(body.to_vec()).map_err(|e| e.to_string())
     }
 
@@ -422,8 +428,8 @@ impl Api {
     async fn query_inner(&self, operation: &str, variables: Value) -> Result<Value> {
         for attempt in 0..2 {
             let hash = HASHES.read().unwrap().get(operation).cloned().unwrap_or_default();
-            let token = self.session.login5().auth_token().await.map_err(|e| e.to_string())?;
-            let client_token = self.session.spclient().client_token().await.map_err(|e| e.to_string())?;
+            let token = self.session()?.login5().auth_token().await.map_err(|e| e.to_string())?;
+            let client_token = self.session()?.spclient().client_token().await.map_err(|e| e.to_string())?;
             let body = json!({
                 "variables": variables,
                 "operationName": operation,
@@ -439,7 +445,7 @@ impl Api {
                 .header("App-Platform", "WebPlayer")
                 .body(Bytes::from(body.to_string()))
                 .map_err(|e| e.to_string())?;
-            let response = self.session.http_client().request_body(request);
+            let response = self.session()?.http_client().request_body(request);
             let response = tokio::time::timeout(Duration::from_secs(20), response)
                 .await
                 .map_err(|_| "Spotify took too long to answer".to_owned())?;
@@ -468,7 +474,8 @@ impl Api {
 
     pub fn is_premium(&self) -> bool {
         self.session
-            .get_user_attribute("type")
+            .as_ref()
+            .and_then(|s| s.get_user_attribute("type"))
             .is_none_or(|t| t == "premium")
     }
 
@@ -749,7 +756,7 @@ impl Api {
 
     /// Queues a track on this device through Spotify Connect.
     pub async fn add_to_queue(&self, uri: &str) -> Result<()> {
-        let device = self.session.device_id().to_owned();
+        let device = self.session()?.device_id().to_owned();
         let body = json!({
             "command": {
                 "endpoint": "add_to_queue",
@@ -757,7 +764,7 @@ impl Api {
                 "logging_params": {},
             }
         });
-        self.session
+        self.session()?
             .spclient()
             .request_as_json(
                 &Method::POST,
@@ -778,7 +785,7 @@ impl Api {
         );
         let mut headers = http::HeaderMap::new();
         headers.insert("app-platform", http::HeaderValue::from_static("WebPlayer"));
-        let bytes = match self.session.spclient().request_as_json(&Method::GET, &endpoint, Some(headers), None).await {
+        let bytes = match self.session()?.spclient().request_as_json(&Method::GET, &endpoint, Some(headers), None).await {
             Ok(bytes) => bytes,
             Err(e) if e.kind == librespot_core::error::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(e.to_string()),
@@ -810,7 +817,7 @@ impl Api {
     /// The album a track belongs to, for "Go to album" from the player bar.
     pub async fn album_of(&self, track_uri: &str) -> Result<Card> {
         let uri = SpotifyUri::from_uri(track_uri).map_err(|e| e.to_string())?;
-        let track = TrackMetadata::get(&self.session, &uri).await.map_err(|e| e.to_string())?;
+        let track = TrackMetadata::get(self.session()?, &uri).await.map_err(|e| e.to_string())?;
         Ok(Card {
             kind: Kind::Album,
             uri: track.album.id.to_uri().map_err(|e| e.to_string())?,

@@ -10,7 +10,7 @@ use gtk::{gio, glib};
 use super::cover::Cover;
 use super::track_row::{HeaderSlot, RowMode, column_header, factory, group_digits, objects, short_list};
 use super::{ctx, open_card};
-use crate::api::{Card, Chunk, Header, Home, Images, Kind, SearchResults, Track, id_of};
+use crate::api::{Api, Card, Chunk, Header, Home, Images, Kind, SearchResults, Track, id_of};
 use crate::rt;
 
 /// Horizontal page margin; everything lines up on it.
@@ -517,38 +517,53 @@ fn load_tracks(kind: Kind, uri: &str) -> Rc<Loaded> {
         scan_local(&loaded);
         return loaded;
     }
-    let Some(api) = ctx().api() else { return loaded };
     let id = id_of(uri).to_owned();
     let weak = Rc::downgrade(&loaded);
     glib::spawn_future_local(async move {
-        // What this list looked like last time, from disk, straight away.
-        let (offline, cached_id) = (api.offline(), id.clone());
+        // What this list looked like last time, from disk, straight away,
+        // even while onIfy is still connecting to Spotify.
+        let (offline, cached_id) = (Api::cache_only(), id.clone());
         let cached = rt::spawn(async move { offline.all_tracks(kind, cached_id).await }).await;
-        let Some(shown) = weak.upgrade() else { return };
-        match cached {
+        let shown_uris: Option<Vec<String>> = match cached {
             Ok((header, tracks)) if !tracks.is_empty() => {
+                let Some(loaded) = weak.upgrade() else { return };
                 if let Some(header) = header {
-                    set_header(&shown, header);
+                    set_header(&loaded, header);
                 }
-                let uris: Vec<String> = tracks.iter().map(|t| t.uri.clone()).collect();
-                shown.store.extend_from_slice(&objects(tracks));
-                drop(shown);
-                // Then Spotify's current copy, swapped in only if it changed.
+                let uris = tracks.iter().map(|t| t.uri.clone()).collect();
+                loaded.store.extend_from_slice(&objects(tracks));
+                Some(uris)
+            }
+            _ => None,
+        };
+
+        // Spotify's current copy needs the connection; wait for it if need be.
+        let api = loop {
+            if let Some(api) = ctx().api() {
+                break api;
+            }
+            if weak.upgrade().is_none() {
+                return;
+            }
+            glib::timeout_future(std::time::Duration::from_millis(200)).await;
+        };
+        match shown_uris {
+            // Swap the fresh list in only if something changed.
+            Some(uris) => {
                 let fresh = rt::spawn(async move { api.all_tracks(kind, id).await }).await;
-                let Some(shown) = weak.upgrade() else { return };
+                let Some(loaded) = weak.upgrade() else { return };
                 if let Ok((header, tracks)) = fresh {
                     if let Some(header) = header {
-                        set_header(&shown, header);
+                        set_header(&loaded, header);
                     }
                     if tracks.iter().map(|t| &t.uri).ne(uris.iter()) {
-                        let n = shown.store.n_items();
-                        shown.store.splice(1, n.saturating_sub(1), &objects(tracks));
+                        let n = loaded.store.n_items();
+                        loaded.store.splice(1, n.saturating_sub(1), &objects(tracks));
                     }
                 }
             }
-            _ => {
-                drop(shown);
-                // Nothing saved yet: show each page as it arrives.
+            // Nothing saved yet: show each page as it arrives.
+            None => {
                 let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
                 rt::handle().spawn(api.stream_tracks(kind, id, tx));
                 while let Some(chunk) = rx.recv().await {
