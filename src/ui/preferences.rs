@@ -116,7 +116,8 @@ fn fill_folders(list: &gtk::ListBox) {
 }
 
 fn change_folders(change: impl FnOnce(&mut Vec<PathBuf>)) {
-    change(&mut ctx().settings.borrow_mut().local_folders);
+    let ctx = ctx();
+    change(&mut ctx.settings.borrow_mut().local_folders);
     save();
     super::local_folders_changed();
 }
@@ -126,7 +127,8 @@ fn discord_group() -> adw::PreferencesGroup {
         .title("Discord")
         .description("Shows the song you're listening to on your profile, in the Discord app or in arRPC clients like onCord.")
         .build();
-    let settings = ctx().settings.borrow();
+    let shared = ctx();
+    let settings = shared.settings.borrow();
     let enabled = adw::SwitchRow::builder()
         .title("Show Listening Activity")
         .active(settings.discord_enabled)
@@ -199,7 +201,8 @@ fn lastfm_group() -> adw::PreferencesGroup {
         secret,
         move |_: &adw::EntryRow| {
             {
-                let mut settings = ctx().settings.borrow_mut();
+                let ctx = ctx();
+                let mut settings = ctx.settings.borrow_mut();
                 settings.lastfm.api_key = key.text().trim().to_owned();
                 settings.lastfm.secret = secret.text().trim().to_owned();
                 settings.lastfm.session.clear();
@@ -219,7 +222,8 @@ fn lastfm_group() -> adw::PreferencesGroup {
             let account = ctx().settings.borrow().lastfm.clone();
             if account.is_connected() {
                 {
-                    let mut settings = ctx().settings.borrow_mut();
+                    let ctx = ctx();
+                    let mut settings = ctx.settings.borrow_mut();
                     settings.lastfm.session.clear();
                     settings.lastfm.username.clear();
                 }
@@ -244,7 +248,8 @@ fn lastfm_group() -> adw::PreferencesGroup {
                 match result {
                     Ok((session, username)) => {
                         {
-                            let mut settings = ctx().settings.borrow_mut();
+                            let ctx = ctx();
+                            let mut settings = ctx.settings.borrow_mut();
                             settings.lastfm.session = session;
                             settings.lastfm.username = username;
                         }
