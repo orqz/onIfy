@@ -29,7 +29,12 @@ jobs:
 
             - uses: Swatinem/rust-cache@v2
 
+            # Private-repo runners have ~7 GB; inside the container a full-LTO,
+            # many-job build ran out of memory, so keep this one lighter.
             - run: cargo build --release --locked
+              env:
+                  CARGO_BUILD_JOBS: "2"
+                  CARGO_PROFILE_RELEASE_LTO: "false"
 
             - uses: actions/upload-artifact@v4
               with:
