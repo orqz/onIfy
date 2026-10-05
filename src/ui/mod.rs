@@ -768,23 +768,62 @@ fn load_library() {
         toast("Playback needs Spotify Premium");
     }
     spawn_local(async move {
-        let (library, home) = rt::spawn(async move { tokio::join!(api.library(), api.home()) }).await;
+        // Last time's library and Home straight from disk, then Spotify's
+        // current ones, redrawn only if they changed.
+        let offline = api.offline();
+        let (library, home) = rt::spawn(async move { tokio::join!(offline.library(), offline.home()) }).await;
         let ctx = ctx();
+        let shown_library = library.ok();
+        let shown_home = home.ok();
+        if let Some(library) = &shown_library {
+            fill_sidebar(library);
+        }
+        if let Some(home) = &shown_home {
+            ctx.home.fill(home);
+        }
+        if shown_library.is_some() {
+            if let Some(link) = ctx.pending_link.take() {
+                open_link(&link);
+            }
+        }
+
+        let (library, home) = rt::spawn(async move { tokio::join!(api.library(), api.home()) }).await;
+        let ctx = self::ctx();
         match library {
-            Ok(library) => fill_sidebar(&library),
-            Err(e) => toast(&format!("Couldn't load your library: {e}")),
+            Ok(library) => {
+                if shown_library.as_deref().is_none_or(|shown| !same_cards(shown, &library)) {
+                    fill_sidebar(&library);
+                }
+            }
+            Err(e) if shown_library.is_none() => toast(&format!("Couldn't load your library: {e}")),
+            Err(_) => {}
         }
         if let Some(link) = ctx.pending_link.take() {
             open_link(&link);
         }
         match home {
-            Ok(home) => ctx.home.fill(&home),
-            Err(e) => {
+            Ok(home) => {
+                let changed = shown_home.as_ref().is_none_or(|shown| {
+                    shown.sections.len() != home.sections.len()
+                        || shown.sections.iter().zip(&home.sections).any(|(a, b)| a.0 != b.0 || !same_cards(&a.1, &b.1))
+                });
+                if changed {
+                    ctx.home.fill(&home);
+                }
+            }
+            Err(e) if shown_home.is_none() => {
                 ctx.home.fill(&Default::default());
                 toast(&format!("Couldn't load Home: {e}"));
             }
+            Err(_) => {}
         }
     });
+}
+
+/// Whether two card lists would look the same.
+fn same_cards(a: &[Card], b: &[Card]) -> bool {
+    a.len() == b.len()
+        && a.iter().zip(b).all(|(a, b)| a.uri == b.uri && a.name == b.name && a.images.pick(100) == b.images.pick(100))
 }
 
 fn logout() {

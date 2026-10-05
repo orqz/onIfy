@@ -177,6 +177,8 @@ pub enum Event {
 pub struct Engine {
     pub session: Session,
     spirc: Spirc,
+    /// Kept to preload songs ahead of a click.
+    player: Arc<Player>,
     /// Set when the user skips, so the old track's queued tail is dropped.
     flush_on_load: Arc<AtomicBool>,
     shuffle: AtomicBool,
@@ -219,12 +221,13 @@ impl Engine {
             ..ConnectConfig::default()
         };
         let (spirc, spirc_task) =
-            Spirc::new(connect_config, session.clone(), credentials, player, mixer).await?;
+            Spirc::new(connect_config, session.clone(), credentials, player.clone(), mixer).await?;
 
         let flush_on_load = Arc::new(AtomicBool::new(false));
         let engine = Arc::new(Self {
             session,
             spirc,
+            player,
             flush_on_load: flush_on_load.clone(),
             shuffle: AtomicBool::new(false),
             repeat: AtomicBool::new(false),
@@ -282,6 +285,14 @@ impl Engine {
 
     pub fn play(&self) {
         let _ = self.spirc.play();
+    }
+
+    /// Starts loading a song likely to be played next (e.g. the one under the
+    /// pointer), so it starts at once if it is.
+    pub fn preload(&self, uri: &str) {
+        if let Ok(uri) = librespot_core::SpotifyUri::from_uri(uri) {
+            self.player.preload(uri);
+        }
     }
 
     pub fn pause(&self) {

@@ -73,8 +73,13 @@ glib::wrapper! {
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget, gtk::Orientable;
 }
 
+/// How long the pointer rests on a song before it's preloaded.
+const PRELOAD_AFTER: std::time::Duration = std::time::Duration::from_millis(300);
+
 thread_local! {
     static ROWS: RefCell<Vec<glib::WeakRef<TrackRow>>> = const { RefCell::new(Vec::new()) };
+    static HOVER: RefCell<Option<glib::SourceId>> = const { RefCell::new(None) };
+    static PRELOADED: RefCell<String> = const { RefCell::new(String::new()) };
     static NOW_PLAYING: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
@@ -162,7 +167,8 @@ impl TrackRow {
         columns.append(&album);
         row.append(&columns);
 
-        let plays = gtk::Label::builder().xalign(1.0).visible(false).build();
+        // Fixed width (up to "9,999,999,999") so columns line up row to row.
+        let plays = gtk::Label::builder().xalign(1.0).width_chars(13).visible(false).build();
         plays.add_css_class("numeric");
         plays.add_css_class("track-plays");
         dim(&plays);
@@ -184,6 +190,36 @@ impl TrackRow {
             plays,
             duration,
         });
+
+        // Rest the pointer on a song and it starts loading, so a click plays
+        // it at once instead of waiting on Spotify.
+        let hover = gtk::EventControllerMotion::new();
+        hover.connect_enter(glib::clone!(
+            #[weak]
+            row,
+            move |_, _, _| {
+                let weak = row.downgrade();
+                let id = glib::timeout_add_local_once(PRELOAD_AFTER, move || {
+                    HOVER.with_borrow_mut(|h| h.take());
+                    let Some(track) = weak.upgrade().and_then(|r| r.track()) else { return };
+                    let playing = NOW_PLAYING.with_borrow(|now| *now == track.uri);
+                    let fresh = PRELOADED.with_borrow(|last| *last != track.uri);
+                    if track.playable && !playing && fresh {
+                        PRELOADED.with_borrow_mut(|last| *last = track.uri.clone());
+                        super::ctx().with_engine(|e| e.preload(&track.uri));
+                    }
+                });
+                if let Some(old) = HOVER.with_borrow_mut(|h| h.replace(id)) {
+                    old.remove();
+                }
+            }
+        ));
+        hover.connect_leave(|_| {
+            if let Some(id) = HOVER.with_borrow_mut(|h| h.take()) {
+                id.remove();
+            }
+        });
+        row.add_controller(hover);
 
         let click = gtk::GestureClick::builder().button(gdk::BUTTON_SECONDARY).build();
         click.connect_pressed(glib::clone!(

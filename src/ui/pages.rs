@@ -518,30 +518,62 @@ fn load_tracks(kind: Kind, uri: &str) -> Rc<Loaded> {
         return loaded;
     }
     let Some(api) = ctx().api() else { return loaded };
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    rt::handle().spawn(api.stream_tracks(kind, id_of(uri).to_owned(), tx));
+    let id = id_of(uri).to_owned();
     let weak = Rc::downgrade(&loaded);
     glib::spawn_future_local(async move {
-        while let Some(chunk) = rx.recv().await {
-            let Some(loaded) = weak.upgrade() else { return };
-            match chunk {
-                Chunk::Header(header) => {
-                    // The header arrives once; later visits read it directly.
-                    for listener in loaded.listeners.take() {
-                        listener(&header);
-                    }
-                    loaded.header.replace(Some(header));
+        // What this list looked like last time, from disk, straight away.
+        let (offline, cached_id) = (api.offline(), id.clone());
+        let cached = rt::spawn(async move { offline.all_tracks(kind, cached_id).await }).await;
+        let Some(shown) = weak.upgrade() else { return };
+        match cached {
+            Ok((header, tracks)) if !tracks.is_empty() => {
+                if let Some(header) = header {
+                    set_header(&shown, header);
                 }
-                Chunk::Tracks(tracks) => loaded.store.extend_from_slice(&objects(tracks)),
-                Chunk::Failed(e) => {
-                    ctx().stores.borrow_mut().remove(&key);
-                    super::toast(&format!("Couldn't load: {e}"));
+                let uris: Vec<String> = tracks.iter().map(|t| t.uri.clone()).collect();
+                shown.store.extend_from_slice(&objects(tracks));
+                drop(shown);
+                // Then Spotify's current copy, swapped in only if it changed.
+                let fresh = rt::spawn(async move { api.all_tracks(kind, id).await }).await;
+                let Some(shown) = weak.upgrade() else { return };
+                if let Ok((header, tracks)) = fresh {
+                    if let Some(header) = header {
+                        set_header(&shown, header);
+                    }
+                    if tracks.iter().map(|t| &t.uri).ne(uris.iter()) {
+                        let n = shown.store.n_items();
+                        shown.store.splice(1, n.saturating_sub(1), &objects(tracks));
+                    }
+                }
+            }
+            _ => {
+                drop(shown);
+                // Nothing saved yet: show each page as it arrives.
+                let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+                rt::handle().spawn(api.stream_tracks(kind, id, tx));
+                while let Some(chunk) = rx.recv().await {
+                    let Some(loaded) = weak.upgrade() else { return };
+                    match chunk {
+                        Chunk::Header(header) => set_header(&loaded, header),
+                        Chunk::Tracks(tracks) => loaded.store.extend_from_slice(&objects(tracks)),
+                        Chunk::Failed(e) => {
+                            ctx().stores.borrow_mut().remove(&key);
+                            super::toast(&format!("Couldn't load: {e}"));
+                        }
+                    }
                 }
             }
         }
         crate::memory::trim_soon();
     });
     loaded
+}
+
+fn set_header(loaded: &Loaded, header: Header) {
+    for listener in loaded.listeners.take() {
+        listener(&header);
+    }
+    loaded.header.replace(Some(header));
 }
 
 /// Fills Local Files from the music folders, scanned off the UI thread.
@@ -572,10 +604,7 @@ fn scan_local(loaded: &Rc<Loaded>) {
             subtitle,
             images: Images::default(),
         };
-        for listener in loaded.listeners.take() {
-            listener(&header);
-        }
-        loaded.header.replace(Some(header));
+        set_header(&loaded, header);
         loaded.store.extend_from_slice(&objects(tracks));
     });
 }

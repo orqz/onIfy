@@ -336,14 +336,32 @@ pub enum Chunk {
     Failed(String),
 }
 
+/// Answers worth keeping on disk: shown instantly next time, then refreshed.
+const CACHED: &[&str] = &["libraryV3", "home", "fetchPlaylist", "getAlbum", "fetchLibraryTracks", "queryArtistOverview"];
+
+fn cache_file(operation: &str, variables: &Value) -> std::path::PathBuf {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    (operation, variables.to_string()).hash(&mut hasher);
+    crate::spotify::cache_dir().join("api").join(format!("{:016x}.json", hasher.finish()))
+}
+
 #[derive(Clone)]
 pub struct Api {
     session: Session,
+    /// Answer from the disk cache only, never the network.
+    offline: bool,
 }
 
 impl Api {
     pub fn new(session: Session) -> Self {
-        Self { session }
+        Self { session, offline: false }
+    }
+
+    /// The same API answering from what was saved last time, instantly and
+    /// without the network. Anything not saved fails with "not cached".
+    pub fn offline(&self) -> Self {
+        Self { session: self.session.clone(), offline: true }
     }
 
     async fn get_text(&self, url: &str) -> Result<String> {
@@ -384,6 +402,24 @@ impl Api {
     }
 
     async fn query(&self, operation: &str, variables: Value) -> Result<Value> {
+        let file = cache_file(operation, &variables);
+        if self.offline {
+            let bytes = tokio::fs::read(&file).await.map_err(|_| "not cached".to_owned())?;
+            return serde_json::from_slice(&bytes).map_err(|e| e.to_string());
+        }
+        let started = Instant::now();
+        let result = self.query_inner(operation, variables).await;
+        log::debug!("{operation} took {} ms", started.elapsed().as_millis());
+        if let (Ok(data), true) = (&result, CACHED.contains(&operation)) {
+            if let Some(dir) = file.parent() {
+                let _ = tokio::fs::create_dir_all(dir).await;
+            }
+            let _ = tokio::fs::write(&file, data.to_string()).await;
+        }
+        result
+    }
+
+    async fn query_inner(&self, operation: &str, variables: Value) -> Result<Value> {
         for attempt in 0..2 {
             let hash = HASHES.read().unwrap().get(operation).cloned().unwrap_or_default();
             let token = self.session.login5().auth_token().await.map_err(|e| e.to_string())?;
@@ -567,6 +603,21 @@ impl Api {
         })
     }
 
+    /// A whole track list at once: its header and every track.
+    pub async fn all_tracks(self, kind: Kind, id: String) -> Result<(Option<Header>, Vec<Track>)> {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(self.stream_tracks(kind, id, tx));
+        let (mut header, mut tracks) = (None, Vec::new());
+        while let Some(chunk) = rx.recv().await {
+            match chunk {
+                Chunk::Header(h) => header = Some(h),
+                Chunk::Tracks(t) => tracks.extend(t),
+                Chunk::Failed(e) => return Err(e),
+            }
+        }
+        Ok((header, tracks))
+    }
+
     /// Streams a track list page by page, so long lists appear immediately.
     pub async fn stream_tracks(self, kind: Kind, id: String, tx: UnboundedSender<Chunk>) {
         if let Err(e) = self.stream_tracks_inner(kind, &id, &tx).await {
@@ -600,8 +651,9 @@ impl Api {
 
     async fn stream_tracks_inner(&self, kind: Kind, id: &str, tx: &UnboundedSender<Chunk>) -> Result<()> {
         let send = |chunk| tx.send(chunk).map_err(|_| "page closed".to_owned());
+        // A small first page shows sooner; the rest come in bigger pages.
         let limit = if kind == Kind::Playlist { 100 } else { 50 };
-        let first = self.page(kind, id, 0, limit).await?;
+        let first = self.page(kind, id, 0, 50).await?;
 
         // Where the tracks live in each kind of response, and how to read them.
         let tracks_of = move |v: &Value, album: Option<(&Named, &Images)>| -> (Vec<Track>, usize) {
