@@ -1069,19 +1069,27 @@ fn install_actions(app: &adw::Application) {
         // Plays one song (Spotify or local) as if clicked, for testing.
         with_string("dev-play", |uri| ctx().with_engine(|e| e.play_tracks(vec![uri.to_owned()], 0)));
         with_string("dev-render", |path| {
+            // A widget paintable only fills in on the next redraw, so ask for
+            // one and save a moment later.
             let window = ctx().window.clone();
-            let (w, h) = (window.width() as f32, window.height() as f32);
-            let snapshot = gtk::Snapshot::new();
-            snapshot.scale(2.0, 2.0);
-            gtk::WidgetPaintable::new(Some(&window)).snapshot(&snapshot, w as f64, h as f64);
-            let (Some(node), Some(renderer)) = (snapshot.to_node(), window.renderer()) else {
-                log::warn!("dev-render: nothing to render ({w}x{h})");
-                return;
-            };
-            let viewport = gtk::graphene::Rect::new(0.0, 0.0, w * 2.0, h * 2.0);
-            if let Err(e) = renderer.render_texture(&node, Some(&viewport)).save_to_png(path) {
-                log::warn!("dev-render failed: {e}");
-            }
+            let content = window.content().unwrap_or_else(|| window.clone().upcast());
+            let paintable = gtk::WidgetPaintable::new(Some(&content));
+            content.queue_draw();
+            let path = path.to_owned();
+            glib::timeout_add_local_once(Duration::from_millis(400), move || {
+                let (w, h) = (window.width() as f32, window.height() as f32);
+                let snapshot = gtk::Snapshot::new();
+                snapshot.scale(2.0, 2.0);
+                paintable.current_image().snapshot(&snapshot, w as f64, h as f64);
+                let (Some(node), Some(renderer)) = (snapshot.to_node(), window.renderer()) else {
+                    log::warn!("dev-render: nothing to render ({w}x{h})");
+                    return;
+                };
+                let viewport = gtk::graphene::Rect::new(0.0, 0.0, w * 2.0, h * 2.0);
+                if let Err(e) = renderer.render_texture(&node, Some(&viewport)).save_to_png(&path) {
+                    log::warn!("dev-render failed: {e}");
+                }
+            });
         });
     }
     with_string("copy-text", |text| {
