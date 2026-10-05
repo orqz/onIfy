@@ -435,7 +435,8 @@ button.row-play {
   min-width: 28px;
   min-height: 28px;
   padding: 0;
-  margin-right: -6px;
+  margin: 0;
+  border-radius: 999px;
   color: #ffffff;
 }
 

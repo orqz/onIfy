@@ -138,6 +138,7 @@ impl TrackRow {
             .transition_type(gtk::StackTransitionType::Crossfade)
             .transition_duration(140)
             .build();
+        lead.set_overflow(gtk::Overflow::Visible);
         let number = gtk::Label::builder().xalign(1.0).hexpand(true).build();
         number.add_css_class("numeric");
         dim(&number);
@@ -148,8 +149,10 @@ impl TrackRow {
         // Rows don't play on a click (that only selects); this button does.
         let play = gtk::Button::from_icon_name("onify-media-playback-start-symbolic");
         play.add_css_class("row-play");
-        play.add_css_class("circular");
         play.add_css_class("flat");
+        // A fixed circle that fits the number's slot (theme "circular"
+        // buttons are wider than the slot and got cut off).
+        play.set_size_request(28, 28);
         play.set_tooltip_text(Some("Play"));
         play.set_hexpand(true);
         play.set_halign(gtk::Align::End);
