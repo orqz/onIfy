@@ -188,6 +188,9 @@ fn finish(key: Key, decoded: Option<Decoded>) {
         }
     }
     pump();
+    if LOADER.with_borrow(|l| l.in_flight == 0) {
+        crate::memory::trim_soon();
+    }
 }
 
 async fn fetch(url: String, px: u32) -> Option<Decoded> {

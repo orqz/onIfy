@@ -2680,6 +2680,7 @@ dependencies = [
  "http-body-util",
  "image",
  "libadwaita",
+ "libc",
  "libpulse-binding",
  "libpulse-simple-binding",
  "librespot-connect",

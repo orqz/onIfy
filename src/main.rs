@@ -6,6 +6,7 @@ mod discord;
 mod images;
 mod lastfm;
 mod local;
+mod memory;
 #[cfg(not(target_os = "linux"))]
 mod media_controls;
 #[cfg(target_os = "linux")]
@@ -19,6 +20,7 @@ use adw::prelude::*;
 use gtk::{gio, glib};
 
 fn main() -> glib::ExitCode {
+    memory::init();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn,onify=info"))
         .init();
     // Tag the audio stream so PipeWire treats it as music.

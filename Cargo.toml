@@ -27,6 +27,7 @@ symphonia = { version = "0.5", default-features = false, features = ["mp3", "fla
 md5 = "0.8"
 
 [target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
 libpulse-binding = "2"
 libpulse-simple-binding = "2"
 mpris-server = "0.10"

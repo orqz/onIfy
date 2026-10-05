@@ -508,6 +508,7 @@ fn load_tracks(kind: Kind, uri: &str) -> Rc<Loaded> {
                 }
             }
         }
+        crate::memory::trim_soon();
     });
     loaded
 }
