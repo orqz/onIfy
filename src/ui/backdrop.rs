@@ -105,47 +105,8 @@ mod imp {
                     gsk::ColorStop::new(1.0, black(0.38)),
                 ],
             );
-            // Fine grain keeps the huge soft gradients from banding.
-            let grain = grain();
-            let tile = graphene::Rect::new(0.0, 0.0, grain.width() as f32 / 2.0, grain.height() as f32 / 2.0);
-            snapshot.push_repeat(&bounds, Some(&tile));
-            snapshot.append_texture(&grain, &tile);
-            snapshot.pop();
         }
     }
-}
-
-thread_local! {
-    static GRAIN: OnceCell<gdk::Texture> = const { OnceCell::new() };
-}
-
-fn grain() -> gdk::Texture {
-    GRAIN.with(|g| {
-        g.get_or_init(|| {
-            const SIZE: usize = 128;
-            let mut seed: u32 = 0x9e37_79b9;
-            let mut pixels = Vec::with_capacity(SIZE * SIZE * 4);
-            for _ in 0..SIZE * SIZE {
-                seed ^= seed << 13;
-                seed ^= seed >> 17;
-                seed ^= seed << 5;
-                let alpha = (seed % 9) as u8; // up to ~3.5% opacity
-                let v = if seed & 0x100 == 0 { 255 } else { 0 };
-                // Premultiplied.
-                let c = (v as u32 * alpha as u32 / 255) as u8;
-                pixels.extend_from_slice(&[c, c, c, alpha]);
-            }
-            gdk::MemoryTexture::new(
-                SIZE as i32,
-                SIZE as i32,
-                gdk::MemoryFormat::R8g8b8a8Premultiplied,
-                &glib::Bytes::from_owned(pixels),
-                SIZE * 4,
-            )
-            .upcast()
-        })
-        .clone()
-    })
 }
 
 glib::wrapper! {

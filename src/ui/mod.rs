@@ -55,6 +55,9 @@ impl Route {
 
 /// Home, Search, Liked Songs and Local Files; library rows follow these.
 const FIXED_ROWS: usize = 4;
+/// Room kept under the pages for the floating player: its 68px capsule, its
+/// 12px bottom margin and an 8px gap, so nothing ever sits behind it.
+const PLAYER_SPACE: i32 = 88;
 
 struct Login {
     widget: adw::ToolbarView,
@@ -180,6 +183,7 @@ pub fn activate(app: &adw::Application) {
     nav.add(&home.page);
     nav.add(&search.page);
     nav.replace_with_tags(&["home"]);
+    nav.set_margin_bottom(PLAYER_SPACE);
     let content = adw::NavigationPage::builder().title("onIfy").child(&nav).build();
     let (sidebar_page, sidebar, sidebar_glass) = build_sidebar();
     let split = adw::NavigationSplitView::builder()
@@ -201,6 +205,7 @@ pub fn activate(app: &adw::Application) {
     // and the player floats on glass above both.
     let backdrop = Backdrop::new();
     let host = GlassHost::new(&backdrop, &root, &bar.widget);
+    host.set_lane(&content);
     host.add_panel(&sidebar_glass);
     root.connect_visible_child_name_notify(glib::clone!(
         #[weak(rename_to = bar)]
@@ -213,6 +218,8 @@ pub fn activate(app: &adw::Application) {
 
     let narrow = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 760sp").unwrap());
     narrow.add_setter(&split, "collapsed", Some(&true.to_value()));
+    // Collapsed, the sidebar fills the window, so it makes room for the player.
+    narrow.add_setter(&sidebar_glass, "margin-bottom", Some(&(PLAYER_SPACE - 12).to_value()));
     narrow.add_setter(&bar.side_end, "visible", Some(&false.to_value()));
     narrow.add_setter(&bar.widget, "homogeneous", Some(&false.to_value()));
     window.add_breakpoint(narrow);

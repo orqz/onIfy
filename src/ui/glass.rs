@@ -1,14 +1,13 @@
 //! Liquid glass.
 //!
 //! Glass only looks like glass when you can see through it, so panels don't
-//! paint themselves. The window's `GlassHost` knows what lies behind each one
-//! (the blurred cover and the page underneath) and draws it through the panel:
-//! blurred, slightly magnified like a lens, with its colour lifted, then a
-//! light tint and the edge lighting that gives the glass its thickness.
+//! paint themselves. The window's `GlassHost` draws the backdrop (the blurred
+//! cover) through each one: slightly magnified like a lens, its colour lifted,
+//! then a light tint and the edge lighting that gives the glass its thickness.
 //!
 //! The host holds the backdrop, the page content and one floating panel (the
-//! player). Panels inside the content, like the sidebar, are registered with
-//! `add_panel` and see the backdrop through them.
+//! player), which it centres in a "lane" (the playlist column). Panels inside
+//! the content, like the sidebar, are registered with `add_panel`.
 
 use std::cell::{Cell, OnceCell, RefCell};
 
@@ -16,8 +15,8 @@ use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{gdk, glib, graphene, gsk};
 
-/// Blur for what's seen through floating glass.
-const BLUR: f32 = 26.0;
+/// The floating panel's widest, including its margins.
+const FLOAT_MAX_WIDTH: i32 = 760;
 /// Glass magnifies what's behind it a touch, like a thick lens.
 const LENS: f32 = 1.035;
 
@@ -49,6 +48,7 @@ mod imp {
         pub backdrop: OnceCell<gtk::Widget>,
         pub content: OnceCell<gtk::Widget>,
         pub floating: OnceCell<super::Glass>,
+        pub lane: glib::WeakRef<gtk::Widget>,
         pub panels: RefCell<Vec<glib::WeakRef<super::Glass>>>,
     }
 
@@ -87,11 +87,20 @@ mod imp {
                 child.allocate(width, height, baseline, None);
             }
             if let Some(floating) = self.floating.get().filter(|f| f.is_visible()) {
-                // Full width, resting on the bottom edge; its CSS margins keep
-                // it off the window edges.
-                let (_, h, _, _) = floating.measure(gtk::Orientation::Vertical, width);
-                let at = gsk::Transform::new().translate(&graphene::Point::new(0.0, (height - h) as f32));
-                floating.allocate(width, h, -1, Some(at));
+                // Centred in the lane (now allocated, along with the content),
+                // resting on the bottom edge; its CSS margins keep it off the edges.
+                let (x, lane_width) = self
+                    .lane
+                    .upgrade()
+                    .filter(|l| l.is_mapped())
+                    .and_then(|l| l.compute_bounds(&*self.obj()))
+                    .map_or((0.0, width as f32), |b| (b.x(), b.width()));
+                let (min, _, _, _) = floating.measure(gtk::Orientation::Horizontal, -1);
+                let w = (lane_width as i32).min(FLOAT_MAX_WIDTH).max(min);
+                let x = x + (lane_width - w as f32).max(0.0) / 2.0;
+                let (_, h, _, _) = floating.measure(gtk::Orientation::Vertical, w);
+                let at = gsk::Transform::new().translate(&graphene::Point::new(x, (height - h) as f32));
+                floating.allocate(w, h, -1, Some(at));
             }
         }
 
@@ -107,28 +116,23 @@ mod imp {
                 snapshot.append_node(node);
             }
 
-            // Panels in the content see only the backdrop, which is already
-            // soft, so they skip the blur.
             self.panels.borrow_mut().retain(|p| p.upgrade().is_some());
             for panel in self.panels.borrow().iter().filter_map(|p| p.upgrade()) {
                 if !panel.is_drawable() {
                     continue;
                 }
                 if let Some(bounds) = panel.compute_bounds(&*obj) {
-                    draw_material(snapshot, &bounds, panel.radius(), backdrop.as_ref(), 0.0);
+                    draw_material(snapshot, &bounds, panel.radius(), backdrop.as_ref());
                 }
             }
 
-            let content = self.content.get().and_then(node_of);
-            if let Some(node) = &content {
-                snapshot.append_node(node);
+            if let Some(content) = self.content.get() {
+                obj.snapshot_child(content, snapshot);
             }
 
             if let Some(floating) = self.floating.get().filter(|f| f.is_drawable()) {
                 if let Some(bounds) = floating.compute_bounds(&*obj) {
-                    let behind: Vec<gsk::RenderNode> = [backdrop, content].into_iter().flatten().collect();
-                    let behind: gsk::RenderNode = gsk::ContainerNode::new(&behind).upcast();
-                    draw_material(snapshot, &bounds, floating.radius(), Some(&behind), BLUR);
+                    draw_material(snapshot, &bounds, floating.radius(), backdrop.as_ref());
                 }
                 obj.snapshot_child(floating, snapshot);
             }
@@ -177,6 +181,12 @@ impl GlassHost {
         host
     }
 
+    /// The widget whose column the floating panel is centred in.
+    pub fn set_lane(&self, lane: &impl IsA<gtk::Widget>) {
+        self.imp().lane.set(Some(lane.upcast_ref()));
+        self.queue_allocate();
+    }
+
     /// A glass panel inside the content, with the backdrop showing through.
     pub fn add_panel(&self, panel: &Glass) {
         self.imp().panels.borrow_mut().push(panel.downgrade());
@@ -209,7 +219,7 @@ fn vibrancy() -> (graphene::Matrix, graphene::Vec4) {
 }
 
 /// Draws a glass panel's material at `bounds`, seeing `behind` through it.
-fn draw_material(snapshot: &gtk::Snapshot, bounds: &graphene::Rect, radius: f32, behind: Option<&gsk::RenderNode>, blur: f32) {
+fn draw_material(snapshot: &gtk::Snapshot, bounds: &graphene::Rect, radius: f32, behind: Option<&gsk::RenderNode>) {
     let (w, h) = (bounds.width(), bounds.height());
     if w <= 0.0 || h <= 0.0 {
         return;
@@ -225,24 +235,14 @@ fn draw_material(snapshot: &gtk::Snapshot, bounds: &graphene::Rect, radius: f32,
     if let Some(behind) = behind {
         let (matrix, offset) = vibrancy();
         snapshot.push_color_matrix(&matrix, &offset);
-        if blur > 0.0 {
-            snapshot.push_blur(blur as f64);
-        }
-        // Magnify around the panel's centre, sampling only the area the blur
-        // can reach so the offscreen stays panel-sized.
+        // Magnify around the panel's centre.
         let (cx, cy) = (bounds.x() + w / 2.0, bounds.y() + h / 2.0);
         snapshot.save();
         snapshot.translate(&graphene::Point::new(cx, cy));
         snapshot.scale(LENS, LENS);
         snapshot.translate(&graphene::Point::new(-cx, -cy));
-        let reach = blur * 2.0;
-        snapshot.push_clip(&bounds.inset_r(-reach, -reach));
         snapshot.append_node(behind);
-        snapshot.pop();
         snapshot.restore();
-        if blur > 0.0 {
-            snapshot.pop();
-        }
         snapshot.pop();
     }
     // A smoky tint keeps white text readable over bright covers, and a soft

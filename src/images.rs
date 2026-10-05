@@ -26,7 +26,9 @@ const MAX_IN_FLIGHT: usize = 6;
 const DISK_MAX_AGE: Duration = Duration::from_secs(60 * 60 * 24 * 30);
 /// Pass as `px` to get a heavily blurred backdrop version of the image.
 pub const BACKDROP: u32 = 0;
-const BACKDROP_PX: u32 = 128;
+/// The cover is blurred at this size, then smoothly enlarged to BACKDROP_OUT.
+const BACKDROP_PX: u32 = 64;
+const BACKDROP_OUT: u32 = 256;
 
 /// An RGB colour in 0..1.
 pub type Rgb = [f32; 3];
@@ -226,21 +228,24 @@ fn decode(bytes: &[u8], px: u32) -> Option<Decoded> {
     Some((rgba.into_raw(), w, h, None))
 }
 
-/// A small, blurred, slightly more saturated copy. The GPU stretches it over
-/// the whole window for free; the blur happens once here, not every frame.
+/// A soft field of the cover's colours, slightly more saturated. Blurred hard
+/// at a tiny size, then enlarged with a smooth filter so the GPU only has to
+/// stretch it a few times over: no blotches, steps or texture. This happens
+/// once per song, not every frame.
 fn backdrop(image: &image::DynamicImage) -> Decoded {
-    use image::imageops::{FilterType, blur};
+    use image::imageops::{FilterType, blur, resize};
     let small = image.resize_to_fill(BACKDROP_PX, BACKDROP_PX, FilterType::Triangle).into_rgba8();
     let accent = accent_of(&small);
-    let mut blurred = blur(&small, 7.0);
+    let mut blurred = blur(&small, 9.0);
     for p in blurred.pixels_mut() {
         let [r, g, b, _] = p.0.map(|c| c as f32);
         let luma = 0.299 * r + 0.587 * g + 0.114 * b;
         let saturate = |c: f32| (luma + (c - luma) * 1.35).clamp(0.0, 255.0) as u8;
         p.0 = [saturate(r), saturate(g), saturate(b), 255];
     }
-    let (w, h) = blurred.dimensions();
-    (blurred.into_raw(), w, h, Some(accent))
+    let smooth = resize(&blurred, BACKDROP_OUT, BACKDROP_OUT, FilterType::CatmullRom);
+    let (w, h) = smooth.dimensions();
+    (smooth.into_raw(), w, h, Some(accent))
 }
 
 /// Averages the vivid, bright pixels, then lifts the result so it reads as an

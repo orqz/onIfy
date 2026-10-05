@@ -58,7 +58,7 @@ pub struct PlayerBar {
 }
 
 /// The cover fills the capsule's height inside its padding (see style.css).
-const COVER: i32 = 60;
+const COVER: i32 = 52;
 
 fn icon_button(icon: &str, tooltip: &str) -> gtk::Button {
     let button = gtk::Button::from_icon_name(icon);
@@ -77,14 +77,14 @@ impl PlayerBar {
     pub fn new() -> Rc<Self> {
         // Three equal columns, like Spotify: the controls stay centred no
         // matter how long the song title is. Corners are concentric: the
-        // capsule's 28px radius minus its 10px padding is the cover's 18px.
-        let widget = Glass::new(gtk::Orientation::Horizontal, 16, 28.0);
+        // capsule's 22px radius minus its 8px padding is the cover's 14px.
+        let widget = Glass::new(gtk::Orientation::Horizontal, 12, 22.0);
         widget.set_homogeneous(true);
         widget.add_css_class("player-bar");
 
         // Left: what's playing.
-        let side_start = gtk::Box::builder().spacing(14).build();
-        let cover = Cover::new(COVER, 18.0);
+        let side_start = gtk::Box::builder().spacing(12).build();
+        let cover = Cover::new(COVER, 14.0);
         cover.set_cursor_from_name(Some("pointer"));
         let text = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
@@ -149,7 +149,7 @@ impl PlayerBar {
         let side_end = gtk::Box::builder().spacing(4).halign(gtk::Align::End).build();
         let volume_button = icon_button("onify-audio-volume-high-symbolic", "Mute");
         let volume = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 1.0, 0.01);
-        volume.set_width_request(120);
+        volume.set_width_request(96);
         volume.add_css_class("progress");
         side_end.append(&volume_button);
         side_end.append(&volume);

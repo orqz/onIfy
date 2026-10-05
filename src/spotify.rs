@@ -335,14 +335,22 @@ async fn forward_events(
     output: Arc<Output>,
     flush_on_load: Arc<AtomicBool>,
 ) {
+    // librespot announces a new request before it reports the old one as
+    // stopped, so events can arrive for a song that's already been replaced.
+    // Acting on those left the play button showing ▶ while music played.
+    let mut current = None;
     while let Some(event) = player_events.recv().await {
-        let event = match event {
-            PlayerEvent::PlayRequestIdChanged { .. } => {
-                if flush_on_load.swap(false, Ordering::Relaxed) {
-                    output.flush();
-                }
-                continue;
+        if let PlayerEvent::PlayRequestIdChanged { play_request_id } = event {
+            current = Some(play_request_id);
+            if flush_on_load.swap(false, Ordering::Relaxed) {
+                output.flush();
             }
+            continue;
+        }
+        if event.get_play_request_id().is_some_and(|id| current.is_some_and(|c| c != id)) {
+            continue;
+        }
+        let event = match event {
             PlayerEvent::Seeked { position_ms, .. } => {
                 output.flush();
                 Event::Position { position_ms }
