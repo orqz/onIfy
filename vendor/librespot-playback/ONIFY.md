@@ -2,3 +2,5 @@ Vendored from librespot-playback 0.8.0 (https://github.com/librespot-org/libresp
 
 onIfy changes: src/decoder/resampler.rs, and src/decoder/symphonia_decoder.rs now
 resamples local files that are not 44.1 kHz and plays mono files on both channels.
+src/player.rs: seeking waits for read_ahead_before_playback (1 s) of audio instead of
+read_ahead_during_playback (5 s).

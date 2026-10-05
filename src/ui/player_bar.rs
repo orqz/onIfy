@@ -52,6 +52,8 @@ pub struct PlayerBar {
     volume_button: gtk::Button,
     volume: gtk::Scale,
     state: RefCell<State>,
+    /// Other shuffle toggles (on playlist pages) that light up with this one.
+    shuffle_buttons: RefCell<Vec<glib::WeakRef<gtk::Button>>>,
     tick: RefCell<Option<glib::SourceId>>,
     seek_debounce: RefCell<Option<glib::SourceId>>,
     dragging: Cell<bool>,
@@ -174,6 +176,7 @@ impl PlayerBar {
             volume_button,
             volume,
             state: RefCell::default(),
+            shuffle_buttons: RefCell::default(),
             tick: RefCell::default(),
             seek_debounce: RefCell::default(),
             dragging: Cell::new(false),
@@ -195,11 +198,7 @@ impl PlayerBar {
         self.play.connect_clicked(with(|bar| bar.toggle_play()));
         prev.connect_clicked(with(|_| ctx().with_engine(|e| e.prev())));
         next.connect_clicked(with(|_| ctx().with_engine(|e| e.next())));
-        self.shuffle.connect_clicked(with(|bar| {
-            let shuffle = !bar.state.borrow().shuffle;
-            bar.set_shuffle(shuffle);
-            ctx().with_engine(|e| e.set_shuffle(shuffle));
-        }));
+        self.shuffle.connect_clicked(with(|bar| bar.toggle_shuffle()));
         self.repeat.connect_clicked(with(|bar| {
             let (context, track) = {
                 let st = bar.state.borrow();
@@ -466,12 +465,31 @@ impl PlayerBar {
         self.set_playing(false, position);
     }
 
+    pub fn toggle_shuffle(&self) {
+        let shuffle = !self.state.borrow().shuffle;
+        self.set_shuffle(shuffle);
+        ctx().with_engine(|e| e.set_shuffle(shuffle));
+    }
+
+    /// Lights `button` up whenever shuffle is on.
+    pub fn add_shuffle_button(&self, button: &gtk::Button) {
+        let mut buttons = self.shuffle_buttons.borrow_mut();
+        buttons.retain(|b| b.upgrade().is_some());
+        buttons.push(button.downgrade());
+        drop(buttons);
+        let shuffle = self.state.borrow().shuffle;
+        self.set_shuffle(shuffle);
+    }
+
     pub fn set_shuffle(&self, shuffle: bool) {
         self.state.borrow_mut().shuffle = shuffle;
-        if shuffle {
-            self.shuffle.add_css_class("active");
-        } else {
-            self.shuffle.remove_css_class("active");
+        let others = self.shuffle_buttons.borrow();
+        for button in std::iter::once(self.shuffle.clone()).chain(others.iter().filter_map(|b| b.upgrade())) {
+            if shuffle {
+                button.add_css_class("active");
+            } else {
+                button.remove_css_class("active");
+            }
         }
     }
 

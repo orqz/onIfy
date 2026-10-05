@@ -472,8 +472,8 @@ fn build_sidebar() -> (adw::NavigationPage, gtk::ListBox, Glass) {
     glass.add_css_class("sidebar-glass");
     glass.set_overflow(gtk::Overflow::Hidden);
     glass.append(&toolbar);
+    // No `.sidebar` class: libadwaita draws a divider line for it.
     let page = adw::NavigationPage::builder().title("onIfy").child(&glass).build();
-    page.add_css_class("sidebar");
     (page, list, glass)
 }
 

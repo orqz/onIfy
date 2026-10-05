@@ -249,6 +249,8 @@ impl Engine {
     }
 
     fn load(&self, request: LoadRequest) {
+        // Timestamps for how long a song takes to start (see "now playing").
+        log::info!("play requested");
         self.flush_on_load.store(true, Ordering::Relaxed);
         let _ = self.spirc.activate();
         let _ = self.spirc.load(request);
@@ -356,7 +358,10 @@ async fn forward_events(
                 Event::Position { position_ms }
             }
             PlayerEvent::PositionCorrection { position_ms, .. } => Event::Position { position_ms },
-            PlayerEvent::Playing { position_ms, .. } => Event::Playing { position_ms },
+            PlayerEvent::Playing { position_ms, .. } => {
+                log::info!("now playing");
+                Event::Playing { position_ms }
+            }
             PlayerEvent::Paused { position_ms, .. } => Event::Paused { position_ms },
             PlayerEvent::Loading { .. } => Event::Loading,
             PlayerEvent::Stopped { .. } => {

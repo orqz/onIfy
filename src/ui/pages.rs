@@ -559,16 +559,16 @@ fn track_uris(store: &gio::ListStore) -> Vec<String> {
         .collect()
 }
 
-/// Plays a whole track list from the top. Local files have no Spotify
-/// context, so they play as a plain list.
-fn play_all(kind: Kind, context: &str, store: &gio::ListStore, shuffle: bool) {
+/// Plays a whole track list from the top, shuffled if shuffle is on. Local
+/// files have no Spotify context, so they play as a plain list.
+fn play_all(kind: Kind, context: &str, store: &gio::ListStore) {
     if kind == Kind::Local {
         let uris = track_uris(store);
         if !uris.is_empty() {
-            ctx().with_engine(|e| e.play_list(uris, None, Some(shuffle)));
+            ctx().with_engine(|e| e.play_list(uris, None, None));
         }
     } else {
-        ctx().with_engine(|e| e.play_context(context, None, Some(shuffle)));
+        ctx().with_engine(|e| e.play_context(context, None, None));
     }
 }
 
@@ -608,7 +608,8 @@ pub fn tracks_page(kind: Kind, uri: &str, title: &str, images: &Images) -> adw::
     };
     let hero = hero(eyebrow, title, &art);
     let play = play_button("Play");
-    let shuffle = glass_button("onify-media-playlist-shuffle-symbolic", "Shuffle play");
+    let shuffle = glass_button("onify-media-playlist-shuffle-symbolic", "Shuffle");
+    ctx().bar.add_shuffle_button(&shuffle);
     hero.actions.append(&play);
     hero.actions.append(&shuffle);
     if kind == Kind::Local {
@@ -666,10 +667,9 @@ pub fn tracks_page(kind: Kind, uri: &str, title: &str, images: &Images) -> adw::
         }
     });
 
-    let (ctx_uri, store) = (context.clone(), loaded.store.clone());
-    play.connect_clicked(move |_| play_all(kind, &ctx_uri, &store, false));
     let store = loaded.store.clone();
-    shuffle.connect_clicked(move |_| play_all(kind, &context, &store, true));
+    play.connect_clicked(move |_| play_all(kind, &context, &store));
+    shuffle.connect_clicked(|_| ctx().bar.toggle_shuffle());
 
     let scroller = scrolled(&list);
     let header = fading_header(title, &scroller.vadjustment(), 200.0);
