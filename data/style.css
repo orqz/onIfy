@@ -179,10 +179,17 @@ list.navigation-sidebar > row:selected {
   box-shadow: 0 22px 54px rgba(0, 0, 0, 0.5);
 }
 
-.liked-tile {
+.icon-tile {
   border-radius: 14px;
-  background-image: linear-gradient(135deg, #4b1fd8 0%, #8d72f0 55%, #c6b8ff 100%);
   color: white;
+}
+
+.liked-tile {
+  background-image: linear-gradient(135deg, #4b1fd8 0%, #8d72f0 55%, #c6b8ff 100%);
+}
+
+.local-tile {
+  background-image: linear-gradient(135deg, #0f6b5c 0%, #1fae8c 55%, #9be8c9 100%);
 }
 
 button.hero-play {

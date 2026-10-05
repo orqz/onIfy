@@ -2,9 +2,16 @@
 
 mod api;
 mod audio;
+mod discord;
 mod images;
+mod lastfm;
+mod local;
+#[cfg(not(target_os = "linux"))]
+mod media_controls;
+#[cfg(target_os = "linux")]
 mod mpris;
 mod rt;
+mod settings;
 mod spotify;
 mod ui;
 
@@ -15,6 +22,7 @@ fn main() -> glib::ExitCode {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn,onify=info"))
         .init();
     // Tag the audio stream so PipeWire treats it as music.
+    #[cfg(target_os = "linux")]
     unsafe {
         std::env::set_var("PULSE_PROP_media.role", "music");
         std::env::set_var("PULSE_PROP_application.icon_name", ui::APP_ID);

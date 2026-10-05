@@ -3,8 +3,10 @@
 mod backdrop;
 mod cover;
 mod glass;
+mod integrations;
 mod pages;
 mod player_bar;
+mod preferences;
 mod track_row;
 
 use std::cell::{Cell, OnceCell, RefCell};
@@ -18,13 +20,13 @@ use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 use librespot_core::authentication::Credentials;
 use librespot_core::error::ErrorKind;
-use mpris_server::{LoopStatus, Metadata, PlaybackStatus, Time, TrackId};
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::api::{Api, Card, Images, Kind, id_of};
+use crate::api::{Api, Card, Images, Kind};
 use crate::audio::Output;
+use crate::settings::Settings;
 use crate::spotify::{self, Engine, Event, NowPlaying};
-use crate::{images, mpris, rt};
+use crate::{images, rt};
 use backdrop::Backdrop;
 use cover::Cover;
 use pages::{HomePage, Loaded, SearchPage};
@@ -50,40 +52,8 @@ impl Route {
     }
 }
 
-struct Settings {
-    device_id: String,
-    volume: u16,
-}
-
-impl Settings {
-    fn path() -> std::path::PathBuf {
-        spotify::config_dir().join("settings.json")
-    }
-
-    fn load() -> Self {
-        let v: serde_json::Value = std::fs::read(Self::path())
-            .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok())
-            .unwrap_or_default();
-        let settings = Self {
-            device_id: v["device_id"]
-                .as_str()
-                .map(str::to_owned)
-                .unwrap_or_else(|| glib::uuid_string_random().replace('-', "")),
-            volume: v["volume"].as_u64().map_or(u16::MAX / 10 * 7, |v| v as u16),
-        };
-        if v["device_id"].is_null() {
-            settings.save();
-        }
-        settings
-    }
-
-    fn save(&self) {
-        let v = serde_json::json!({ "device_id": self.device_id, "volume": self.volume });
-        let _ = std::fs::create_dir_all(spotify::config_dir());
-        let _ = std::fs::write(Self::path(), v.to_string());
-    }
-}
+/// Home, Search, Liked Songs and Local Files; library rows follow these.
+const FIXED_ROWS: usize = 4;
 
 struct Login {
     widget: adw::ToolbarView,
@@ -114,6 +84,10 @@ pub struct Ctx {
     pub stores: RefCell<HashMap<String, Rc<Loaded>>>,
     settings: RefCell<Settings>,
     save_pending: Cell<bool>,
+    /// The local folders changed while music played; restart the engine at
+    /// the next pause so it picks them up.
+    engine_stale: Cell<bool>,
+    #[cfg(target_os = "linux")]
     mpris: RefCell<Option<Rc<mpris_server::Player>>>,
     now: RefCell<Option<NowPlaying>>,
     /// A link to open once the library has loaded.
@@ -162,6 +136,7 @@ fn spawn_local(fut: impl Future<Output = ()> + 'static) {
     glib::spawn_future_local(fut);
 }
 
+#[cfg(target_os = "linux")]
 fn with_mpris<F, Fut>(f: F)
 where
     F: FnOnce(Rc<mpris_server::Player>) -> Fut,
@@ -250,7 +225,12 @@ pub fn activate(app: &adw::Application) {
         split,
         nav,
         sidebar,
-        sidebar_routes: RefCell::new(vec![Some(Route::Home), Some(Route::Search), Some(Route::Card(liked_card()))]),
+        sidebar_routes: RefCell::new(vec![
+            Some(Route::Home),
+            Some(Route::Search),
+            Some(Route::Card(liked_card())),
+            Some(Route::Card(local_card())),
+        ]),
         bar,
         home,
         search,
@@ -263,6 +243,8 @@ pub fn activate(app: &adw::Application) {
         stores: RefCell::default(),
         settings: RefCell::new(settings),
         save_pending: Cell::new(false),
+        engine_stale: Cell::new(false),
+        #[cfg(target_os = "linux")]
         mpris: RefCell::default(),
         now: RefCell::default(),
         pending_link: RefCell::default(),
@@ -307,11 +289,7 @@ pub fn activate(app: &adw::Application) {
     }
     window.present();
 
-    spawn_local(async {
-        if let Some(player) = mpris::start().await {
-            self::ctx().mpris.replace(Some(player));
-        }
-    });
+    integrations::start(window.upcast_ref());
     images::prune_disk_cache();
 }
 
@@ -320,6 +298,16 @@ fn liked_card() -> Card {
         kind: Kind::Liked,
         uri: "liked".into(),
         name: "Liked Songs".into(),
+        subtitle: String::new(),
+        images: Images::default(),
+    }
+}
+
+fn local_card() -> Card {
+    Card {
+        kind: Kind::Local,
+        uri: "local".into(),
+        name: "Local Files".into(),
         subtitle: String::new(),
         images: Images::default(),
     }
@@ -428,6 +416,7 @@ fn build_sidebar() -> (adw::NavigationPage, gtk::ListBox) {
     list.append(&nav_row("onify-go-home-symbolic", "Home"));
     list.append(&nav_row("onify-system-search-symbolic", "Search"));
     list.append(&nav_row("onify-heart-filled-symbolic", "Liked Songs"));
+    list.append(&nav_row("onify-folder-music-symbolic", "Local Files"));
     list.connect_row_activated(|_, row| {
         let route = ctx().sidebar_routes.borrow().get(row.index() as usize).cloned().flatten();
         if let Some(route) = route {
@@ -436,9 +425,14 @@ fn build_sidebar() -> (adw::NavigationPage, gtk::ListBox) {
     });
 
     let menu = gio::Menu::new();
-    menu.append(Some("Log Out"), Some("app.logout"));
-    menu.append(Some("About onIfy"), Some("app.about"));
-    menu.append(Some("Quit"), Some("app.quit"));
+    let main_section = gio::Menu::new();
+    main_section.append(Some("Preferences"), Some("app.preferences"));
+    main_section.append(Some("About onIfy"), Some("app.about"));
+    menu.append_section(None, &main_section);
+    let session_section = gio::Menu::new();
+    session_section.append(Some("Log Out"), Some("app.logout"));
+    session_section.append(Some("Quit"), Some("app.quit"));
+    menu.append_section(None, &session_section);
     let menu_button = gtk::MenuButton::builder()
         .icon_name("onify-open-menu-symbolic")
         .menu_model(&menu)
@@ -470,9 +464,9 @@ fn build_sidebar() -> (adw::NavigationPage, gtk::ListBox) {
 fn fill_sidebar(playlists: &[Card]) {
     let ctx = ctx();
     let mut routes = ctx.sidebar_routes.borrow_mut();
-    while routes.len() > 3 {
+    while routes.len() > FIXED_ROWS {
         routes.pop();
-        if let Some(row) = ctx.sidebar.row_at_index(3) {
+        if let Some(row) = ctx.sidebar.row_at_index(FIXED_ROWS as i32) {
             ctx.sidebar.remove(&row);
         }
     }
@@ -545,7 +539,6 @@ fn page_for(card: &Card) -> adw::NavigationPage {
         kind => pages::tracks_page(kind, &card.uri, &card.name, &card.images),
     }
 }
-
 pub fn open_card(card: &Card) {
     navigate(Route::Card(card.clone()), false);
 }
@@ -573,6 +566,9 @@ pub fn open_uri(uri: &str) {
 }
 
 pub fn open_album_of(track_uri: &str) {
+    if !track_uri.starts_with("spotify:track:") {
+        return;
+    }
     let Some(api) = ctx().api() else { return };
     let uri = track_uri.to_owned();
     spawn_local(async move {
@@ -624,10 +620,13 @@ fn connect(credentials: Credentials) {
     let ctx = ctx();
     let generation = ctx.generation.get() + 1;
     ctx.generation.set(generation);
-    let device_id = ctx.settings.borrow().device_id.clone();
+    let (device_id, folders) = {
+        let settings = ctx.settings.borrow();
+        (settings.device_id.clone(), settings.local_folders.clone())
+    };
     let (output, events) = (ctx.output.clone(), ctx.events.clone());
     spawn_local(async move {
-        let started = rt::spawn(Engine::start(credentials, device_id, output, events, generation)).await;
+        let started = rt::spawn(Engine::start(credentials, device_id, folders, output, events, generation)).await;
         let ctx = self::ctx();
         if ctx.generation.get() != generation {
             if let Ok(engine) = started {
@@ -677,6 +676,34 @@ fn reconnect() {
             None => show_login("Please log in again."),
         }
     });
+}
+
+/// librespot indexes the local folders when its player starts, so new folders
+/// need a fresh engine. That waits for a pause if music is playing.
+pub fn local_folders_changed() {
+    let ctx = ctx();
+    ctx.stores.borrow_mut().remove("local");
+    if ctx.engine.borrow().is_none() {
+        return;
+    }
+    ctx.engine_stale.set(true);
+    if !ctx.bar.is_playing() {
+        restart_if_stale();
+    }
+}
+
+fn restart_if_stale() {
+    let ctx = ctx();
+    if !ctx.engine_stale.replace(false) {
+        return;
+    }
+    let Some(credentials) = spotify::cached_credentials() else { return };
+    ctx.generation.set(ctx.generation.get() + 1);
+    if let Some(engine) = ctx.engine.take() {
+        engine.shutdown();
+    }
+    // Give the old device a moment to sign off before this one takes its id.
+    glib::timeout_add_local_once(Duration::from_millis(300), move || connect(credentials));
 }
 
 fn load_library() {
@@ -729,23 +756,8 @@ fn handle_event(event: Event) {
             if ctx.bar.is_playing() {
                 ctx.window.set_title(Some(&format!("{} • {artists}", now.name)));
             }
-            let mut metadata = Metadata::builder()
-                .title(now.name.clone())
-                .artist(now.artists.iter().map(|a| a.name.clone()))
-                .album(now.album.clone())
-                .length(Time::from_millis(now.duration_ms as i64))
-                .url(format!("https://open.spotify.com/track/{}", id_of(&now.uri)));
-            if let Ok(id) = TrackId::try_from(format!("/dev/orqz/onIfy/track/{}", id_of(&now.uri))) {
-                metadata = metadata.trackid(id);
-            }
-            if let Some(cover) = now.cover(640) {
-                metadata = metadata.art_url(cover.to_owned());
-            }
-            let metadata = metadata.build();
-            with_mpris(|p| async move {
-                let _ = p.set_metadata(metadata).await;
-            });
-            ctx.now.replace(Some(now));
+            ctx.now.replace(Some(now.clone()));
+            integrations::track_changed(&now);
         }
         Event::Playing { position_ms } => {
             ctx.bar.set_playing(true, position_ms);
@@ -753,53 +765,34 @@ fn handle_event(event: Event) {
                 let artists = crate::api::join_names(&now.artists);
                 ctx.window.set_title(Some(&format!("{} • {artists}", now.name)));
             }
-            with_mpris(move |p| async move {
-                p.set_position(Time::from_millis(position_ms as i64));
-                let _ = p.set_playback_status(PlaybackStatus::Playing).await;
-            });
+            integrations::playing(position_ms);
         }
         Event::Paused { position_ms } => {
             ctx.bar.set_playing(false, position_ms);
             ctx.window.set_title(Some("onIfy"));
-            with_mpris(move |p| async move {
-                p.set_position(Time::from_millis(position_ms as i64));
-                let _ = p.set_playback_status(PlaybackStatus::Paused).await;
-            });
+            integrations::paused(position_ms);
+            restart_if_stale();
         }
         Event::Position { position_ms } => {
             ctx.bar.set_position(position_ms);
-            with_mpris(move |p| async move {
-                let time = Time::from_millis(position_ms as i64);
-                p.set_position(time);
-                let _ = p.seeked(time).await;
-            });
+            integrations::seeked(position_ms);
         }
         Event::Loading => {}
         Event::Stopped => {
             ctx.bar.stopped();
             ctx.window.set_title(Some("onIfy"));
-            with_mpris(|p| async move {
-                let _ = p.set_playback_status(PlaybackStatus::Paused).await;
-            });
+            integrations::paused(0);
+            restart_if_stale();
         }
         Event::Shuffle(shuffle) => {
             ctx.bar.set_shuffle(shuffle);
             ctx.with_engine(|e| e.note_shuffle(shuffle));
-            with_mpris(move |p| async move {
-                let _ = p.set_shuffle(shuffle).await;
-            });
+            integrations::shuffle(shuffle);
         }
         Event::Repeat { context, track } => {
             ctx.bar.set_repeat(context, track);
             ctx.with_engine(|e| e.note_repeat(context));
-            let status = match (context, track) {
-                (_, true) => LoopStatus::Track,
-                (true, false) => LoopStatus::Playlist,
-                _ => LoopStatus::None,
-            };
-            with_mpris(move |p| async move {
-                let _ = p.set_loop_status(status).await;
-            });
+            integrations::repeat(context, track);
         }
         Event::Volume(volume) => {
             ctx.bar.set_volume(volume);
@@ -811,9 +804,7 @@ fn handle_event(event: Event) {
                     ctx.settings.borrow().save();
                 });
             }
-            with_mpris(move |p| async move {
-                let _ = p.set_volume(volume as f64 / u16::MAX as f64).await;
-            });
+            integrations::volume(volume);
         }
         Event::Unavailable => toast("This song isn't available"),
         Event::Disconnected(generation) => {
@@ -854,6 +845,7 @@ fn install_actions(app: &adw::Application) {
     action("volume-up", || nudge_volume(0.05));
     action("volume-down", || nudge_volume(-0.05));
     action("logout", logout);
+    action("preferences", || preferences::present(&ctx().window));
     action("quit", || {
         ctx().window.close();
     });
@@ -900,6 +892,7 @@ fn install_actions(app: &adw::Application) {
     app.set_accels_for_action("app.volume-up", &["<Ctrl>Up"]);
     app.set_accels_for_action("app.volume-down", &["<Ctrl>Down"]);
     app.set_accels_for_action("app.quit", &["<Ctrl>q"]);
+    app.set_accels_for_action("app.preferences", &["<Ctrl>comma"]);
 }
 
 /// Space plays/pauses from anywhere except while typing.

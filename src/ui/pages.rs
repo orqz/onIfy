@@ -483,6 +483,10 @@ fn load_tracks(kind: Kind, uri: &str) -> Rc<Loaded> {
     });
     ctx().stores.borrow_mut().insert(key.clone(), loaded.clone());
 
+    if kind == Kind::Local {
+        scan_local(&loaded);
+        return loaded;
+    }
     let Some(api) = ctx().api() else { return loaded };
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     rt::handle().spawn(api.stream_tracks(kind, id_of(uri).to_owned(), tx));
@@ -508,6 +512,77 @@ fn load_tracks(kind: Kind, uri: &str) -> Rc<Loaded> {
     loaded
 }
 
+/// Fills Local Files from the music folders, scanned off the UI thread.
+fn scan_local(loaded: &Rc<Loaded>) {
+    let folders = ctx().settings.borrow().local_folders.clone();
+    let weak = Rc::downgrade(loaded);
+    glib::spawn_future_local(async move {
+        let scanned = folders.clone();
+        let tracks = rt::spawn(async move {
+            tokio::task::spawn_blocking(move || crate::local::scan(&scanned))
+                .await
+                .unwrap_or_default()
+        })
+        .await;
+        let Some(loaded) = weak.upgrade() else { return };
+        let places: Vec<String> = folders
+            .iter()
+            .map(|f| f.file_name().unwrap_or(f.as_os_str()).to_string_lossy().into_owned())
+            .collect();
+        let subtitle = match (tracks.len(), places.is_empty()) {
+            (_, true) => "Choose a music folder to see your songs here.".to_owned(),
+            (0, false) => format!("No songs found in {}. MP3, FLAC and MP4 files play here.", places.join(", ")),
+            (1, false) => format!("1 song from {}", places.join(", ")),
+            (n, false) => format!("{n} songs from {}", places.join(", ")),
+        };
+        let header = Header {
+            title: String::new(),
+            subtitle,
+            images: Images::default(),
+        };
+        for listener in loaded.listeners.borrow().iter() {
+            listener(&header);
+        }
+        loaded.header.replace(Some(header));
+        loaded.store.extend_from_slice(&objects(tracks));
+    });
+}
+
+/// Every track URI in a loaded list, in order.
+fn track_uris(store: &gio::ListStore) -> Vec<String> {
+    store
+        .iter::<glib::BoxedAnyObject>()
+        .flatten()
+        .filter_map(|o| o.try_borrow::<Track>().ok().map(|t| t.uri.clone()))
+        .collect()
+}
+
+/// Plays a whole track list from the top. Local files have no Spotify
+/// context, so they play as a plain list.
+fn play_all(kind: Kind, context: &str, store: &gio::ListStore, shuffle: bool) {
+    if kind == Kind::Local {
+        let uris = track_uris(store);
+        if !uris.is_empty() {
+            ctx().with_engine(|e| e.play_list(uris, None, Some(shuffle)));
+        }
+    } else {
+        ctx().with_engine(|e| e.play_context(context, None, Some(shuffle)));
+    }
+}
+
+/// The gradient tile that stands in for a cover on Liked Songs and Local Files.
+fn icon_tile(icon: &str, class: &str) -> gtk::Widget {
+    let tile = gtk::Box::builder().width_request(212).height_request(212).build();
+    tile.add_css_class("icon-tile");
+    tile.add_css_class(class);
+    let image = gtk::Image::from_icon_name(icon);
+    image.set_pixel_size(72);
+    image.set_hexpand(true);
+    image.set_halign(gtk::Align::Center);
+    tile.append(&image);
+    tile.upcast()
+}
+
 pub fn tracks_page(kind: Kind, uri: &str, title: &str, images: &Images) -> adw::NavigationPage {
     let loaded = load_tracks(kind, uri);
     let context = match kind {
@@ -515,26 +590,30 @@ pub fn tracks_page(kind: Kind, uri: &str, title: &str, images: &Images) -> adw::
         _ => uri.to_owned(),
     };
 
-    let art: gtk::Widget = if kind == Kind::Liked {
-        let tile = gtk::Box::builder().width_request(212).height_request(212).build();
-        tile.add_css_class("liked-tile");
-        let heart = gtk::Image::from_icon_name("onify-heart-filled-symbolic");
-        heart.set_pixel_size(72);
-        heart.set_hexpand(true);
-        heart.set_halign(gtk::Align::Center);
-        tile.append(&heart);
-        tile.upcast()
-    } else {
-        let cover = Cover::new(212, 14.0);
-        cover.set_url(images.pick(480));
-        cover.upcast()
+    let art: gtk::Widget = match kind {
+        Kind::Liked => icon_tile("onify-heart-filled-symbolic", "liked-tile"),
+        Kind::Local => icon_tile("onify-folder-music-symbolic", "local-tile"),
+        _ => {
+            let cover = Cover::new(212, 14.0);
+            cover.set_url(images.pick(480));
+            cover.upcast()
+        }
     };
-    let eyebrow = if kind == Kind::Album { "Album" } else { "Playlist" };
+    let eyebrow = match kind {
+        Kind::Album => "Album",
+        Kind::Local => "On this computer",
+        _ => "Playlist",
+    };
     let hero = hero(eyebrow, title, &art);
     let play = play_button("Play");
     let shuffle = glass_button("onify-media-playlist-shuffle-symbolic", "Shuffle play");
     hero.actions.append(&play);
     hero.actions.append(&shuffle);
+    if kind == Kind::Local {
+        let folders = glass_button("onify-list-add-symbolic", "Choose music folders");
+        folders.set_action_name(Some("app.preferences"));
+        hero.actions.append(&folders);
+    }
 
     let header_widget = vbox(0);
     header_widget.append(&hero.widget);
@@ -577,14 +656,22 @@ pub fn tracks_page(kind: Kind, uri: &str, title: &str, images: &Images) -> adw::
     list.connect_activate(move |_, position| {
         let Some(object) = store.item(position).and_downcast::<glib::BoxedAnyObject>() else { return };
         let Ok(track) = object.try_borrow::<Track>() else { return };
-        if track.playable {
+        if !track.playable {
+            return;
+        }
+        if kind == Kind::Local {
+            // The header sits at position 0, so songs start at 1.
+            let uris = track_uris(&store);
+            ctx().with_engine(|e| e.play_list(uris, Some(position as usize - 1), None));
+        } else {
             ctx().with_engine(|e| e.play_context(&ctx_uri, Some(&track.uri), None));
         }
     });
 
-    let ctx_uri = context.clone();
-    play.connect_clicked(move |_| ctx().with_engine(|e| e.play_context(&ctx_uri, None, Some(false))));
-    shuffle.connect_clicked(move |_| ctx().with_engine(|e| e.play_context(&context, None, Some(true))));
+    let (ctx_uri, store) = (context.clone(), loaded.store.clone());
+    play.connect_clicked(move |_| play_all(kind, &ctx_uri, &store, false));
+    let store = loaded.store.clone();
+    shuffle.connect_clicked(move |_| play_all(kind, &context, &store, true));
 
     let scroller = scrolled(&list);
     let header = fading_header(title, &scroller.vadjustment(), 200.0);

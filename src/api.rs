@@ -156,6 +156,8 @@ pub enum Kind {
     Album,
     Artist,
     Liked,
+    /// Songs from the music folders on this computer.
+    Local,
 }
 
 /// Anything that opens a page: a playlist, album or artist.
@@ -526,7 +528,7 @@ impl Api {
                 .await
             }
             Kind::Liked => self.query("fetchLibraryTracks", json!({ "offset": offset, "limit": limit })).await,
-            Kind::Artist => Err("not a track list".into()),
+            Kind::Artist | Kind::Local => Err("not a Spotify track list".into()),
         }
     }
 

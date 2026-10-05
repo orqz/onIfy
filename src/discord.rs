@@ -130,12 +130,16 @@ fn activity(p: &Presence) -> Value {
         "status_display_type": 2, // show the song, not the app name
         "details": clip(&p.title),
         "state": clip(&p.artist),
-        "details_url": p.track_url,
-        "assets": {
-            "large_text": clip(&p.album),
-        },
-        "buttons": [{ "label": "Open in Spotify", "url": p.track_url }],
+        "assets": {},
     });
+    if !p.album.is_empty() {
+        activity["assets"]["large_text"] = json!(clip(&p.album));
+    }
+    // Local files have no link, and Discord rejects empty URLs.
+    if !p.track_url.is_empty() {
+        activity["details_url"] = json!(p.track_url);
+        activity["buttons"] = json!([{ "label": "Open in Spotify", "url": p.track_url }]);
+    }
     if let Some(cover) = &p.cover {
         activity["assets"]["large_image"] = json!(cover);
     }

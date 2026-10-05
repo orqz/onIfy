@@ -1,6 +1,7 @@
 //! The playback engine: a librespot session, player and Spotify Connect device.
 
 use std::path::PathBuf;
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -174,6 +175,7 @@ impl Engine {
     pub async fn start(
         credentials: Credentials,
         device_id: String,
+        local_folders: Vec<PathBuf>,
         output: Arc<Output>,
         events: UnboundedSender<Event>,
         generation: u64,
@@ -188,6 +190,7 @@ impl Engine {
             bitrate: Bitrate::Bitrate320,
             normalisation: true,
             position_update_interval: None,
+            local_file_directories: local_folders,
             ..PlayerConfig::default()
         };
         let sink_output = output.clone();
@@ -254,8 +257,13 @@ impl Engine {
 
     /// Plays a loose list of tracks (search results), starting at `index`.
     pub fn play_tracks(&self, uris: Vec<String>, index: usize) {
-        let track = Some(PlayingTrack::Index(index as u32));
-        self.load(LoadRequest::from_tracks(uris, self.options(track, None)));
+        self.play_list(uris, Some(index), None);
+    }
+
+    /// Plays a loose list of tracks (local files) from `index`, or from the top.
+    pub fn play_list(&self, uris: Vec<String>, index: Option<usize>, shuffle: Option<bool>) {
+        let track = index.map(|i| PlayingTrack::Index(i as u32));
+        self.load(LoadRequest::from_tracks(uris, self.options(track, shuffle)));
     }
 
     pub fn play(&self) {
