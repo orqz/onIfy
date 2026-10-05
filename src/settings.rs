@@ -14,8 +14,6 @@ pub struct Settings {
     pub discord_enabled: bool,
     pub discord_client_id: String,
     pub lastfm: lastfm::Account,
-    /// Scrobble Spotify songs too, not just local files.
-    pub scrobble_spotify: bool,
 }
 
 fn path() -> PathBuf {
@@ -47,9 +45,6 @@ impl Settings {
                 session: text("lastfm_session"),
                 username: text("lastfm_username"),
             },
-            // onIfy plays aren't reported to Spotify, so Spotify's own Last.fm
-            // link never sees them: scrobble everything by default.
-            scrobble_spotify: v["scrobble_spotify"].as_bool().unwrap_or(true),
         };
         if v["device_id"].is_null() {
             settings.save();
@@ -68,7 +63,6 @@ impl Settings {
             "lastfm_secret": self.lastfm.secret,
             "lastfm_session": self.lastfm.session,
             "lastfm_username": self.lastfm.username,
-            "scrobble_spotify": self.scrobble_spotify,
         });
         let _ = std::fs::create_dir_all(crate::spotify::config_dir());
         let _ = std::fs::write(path(), v.to_string());

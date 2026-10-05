@@ -165,8 +165,8 @@ fn discord_group() -> adw::PreferencesGroup {
 
 fn lastfm_group() -> adw::PreferencesGroup {
     let group = adw::PreferencesGroup::builder()
-        .title("Last.fm")
-        .description("Scrobbles what you play. Spotify's own Last.fm link never sees onIfy's plays, so onIfy scrobbles them itself.")
+        .title("Last.fm for Local Files")
+        .description("Spotify's own Last.fm connection already scrobbles what you play in onIfy. Only set this up if your local files don't show up on Last.fm.")
         .build();
     let account = ctx().settings.borrow().lastfm.clone();
     let key = adw::EntryRow::builder()
@@ -183,12 +183,6 @@ fn lastfm_group() -> adw::PreferencesGroup {
     let connect = gtk::Button::builder().valign(gtk::Align::Center).build();
     status.add_suffix(&connect);
     show_account(&status, &connect);
-    let spotify = adw::SwitchRow::builder()
-        .title("Scrobble Spotify Songs")
-        .subtitle("Local files always scrobble")
-        .active(ctx().settings.borrow().scrobble_spotify)
-        .build();
-
     // A new key or secret needs a new login.
     let credentials_changed = glib::clone!(
         #[weak]
@@ -265,11 +259,6 @@ fn lastfm_group() -> adw::PreferencesGroup {
         }
     ));
 
-    spotify.connect_active_notify(|row| {
-        ctx().settings.borrow_mut().scrobble_spotify = row.is_active();
-        save();
-    });
-
     group.add(&key);
     group.add(&secret);
     group.add(&link_row(
@@ -278,7 +267,6 @@ fn lastfm_group() -> adw::PreferencesGroup {
         "https://www.last.fm/api/account/create",
     ));
     group.add(&status);
-    group.add(&spotify);
     group
 }
 

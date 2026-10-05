@@ -1,4 +1,5 @@
-//! Last.fm scrobbling, for local files and (optionally) Spotify songs.
+//! Last.fm scrobbling for local files. Spotify songs never go through here:
+//! Spotify's own Last.fm link already scrobbles them from onIfy's playback.
 //!
 //! Follows Last.fm's rules: "now playing" when a song starts, a scrobble once
 //! it has played for half its length or four minutes, whichever comes first,

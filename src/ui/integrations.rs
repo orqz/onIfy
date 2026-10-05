@@ -92,7 +92,8 @@ pub fn track_changed(now: &NowPlaying) {
 
     let ctx = ctx();
     let settings = ctx.settings.borrow();
-    let scrobble = settings.lastfm.is_connected() && (is_local(&now.uri) || settings.scrobble_spotify);
+    // Spotify scrobbles its own songs; doing it here too would count them twice.
+    let scrobble = settings.lastfm.is_connected() && is_local(&now.uri);
     let song = Song {
         artist: now.artists.first().map(|a| a.name.clone()).unwrap_or_default(),
         title: now.name.clone(),
