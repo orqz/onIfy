@@ -1,0 +1,40 @@
+[package]
+name = "onify"
+version = "0.1.0"
+edition = "2024"
+description = "A smooth, lightweight native Spotify client"
+license = "MIT"
+
+[dependencies]
+gtk = { package = "gtk4", version = "0.11", features = ["v4_20"] }
+adw = { package = "libadwaita", version = "0.9", features = ["v1_8"] }
+librespot-core = "0.8"
+librespot-connect = "0.8"
+librespot-oauth = "0.8"
+librespot-metadata = "0.8"
+librespot-playback = { version = "0.8", default-features = false, features = ["native-tls"] }
+libpulse-binding = "2"
+libpulse-simple-binding = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs"] }
+http = "1"
+bytes = "1"
+http-body-util = "0.1"
+url = "2"
+serde_json = "1"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+mpris-server = "0.10"
+log = "0.4"
+env_logger = { version = "0.11", default-features = false, features = ["auto-color", "humantime"] }
+
+[build-dependencies]
+glib-build-tools = "0.22"
+
+# Keep debug builds fast enough to play audio without stutter.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+lto = "thin"
+codegen-units = 8
+strip = true
+panic = "abort"

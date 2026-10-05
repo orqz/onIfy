@@ -1,0 +1,965 @@
+//! The window, navigation and the glue between the UI and the engine.
+
+mod backdrop;
+mod cover;
+mod glass;
+mod pages;
+mod player_bar;
+mod track_row;
+
+use std::cell::{Cell, OnceCell, RefCell};
+use std::collections::HashMap;
+use std::future::Future;
+use std::rc::Rc;
+use std::sync::Arc;
+use std::time::Duration;
+
+use adw::prelude::*;
+use gtk::{gdk, gio, glib};
+use librespot_core::authentication::Credentials;
+use librespot_core::error::ErrorKind;
+use mpris_server::{LoopStatus, Metadata, PlaybackStatus, Time, TrackId};
+use tokio::sync::mpsc::UnboundedSender;
+
+use crate::api::{Api, Card, Images, Kind, id_of};
+use crate::audio::Output;
+use crate::spotify::{self, Engine, Event, NowPlaying};
+use crate::{images, mpris, rt};
+use backdrop::Backdrop;
+use cover::Cover;
+use pages::{HomePage, Loaded, SearchPage};
+use player_bar::PlayerBar;
+
+pub const APP_ID: &str = "dev.orqz.onIfy";
+
+#[derive(Clone)]
+enum Route {
+    Home,
+    Search,
+    Card(Card),
+}
+
+impl Route {
+    fn tag(&self) -> String {
+        match self {
+            Route::Home => "home".into(),
+            Route::Search => "search".into(),
+            Route::Card(card) if card.kind == Kind::Liked => "liked".into(),
+            Route::Card(card) => card.uri.clone(),
+        }
+    }
+}
+
+struct Settings {
+    device_id: String,
+    volume: u16,
+}
+
+impl Settings {
+    fn path() -> std::path::PathBuf {
+        spotify::config_dir().join("settings.json")
+    }
+
+    fn load() -> Self {
+        let v: serde_json::Value = std::fs::read(Self::path())
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default();
+        let settings = Self {
+            device_id: v["device_id"]
+                .as_str()
+                .map(str::to_owned)
+                .unwrap_or_else(|| glib::uuid_string_random().replace('-', "")),
+            volume: v["volume"].as_u64().map_or(u16::MAX / 10 * 7, |v| v as u16),
+        };
+        if v["device_id"].is_null() {
+            settings.save();
+        }
+        settings
+    }
+
+    fn save(&self) {
+        let v = serde_json::json!({ "device_id": self.device_id, "volume": self.volume });
+        let _ = std::fs::create_dir_all(spotify::config_dir());
+        let _ = std::fs::write(Self::path(), v.to_string());
+    }
+}
+
+struct Login {
+    widget: adw::ToolbarView,
+    button: gtk::Button,
+    status: gtk::Label,
+}
+
+pub struct Ctx {
+    app: adw::Application,
+    window: adw::ApplicationWindow,
+    toasts: adw::ToastOverlay,
+    backdrop: Backdrop,
+    root: gtk::Stack,
+    login: Login,
+    split: adw::NavigationSplitView,
+    nav: adw::NavigationView,
+    sidebar: gtk::ListBox,
+    sidebar_routes: RefCell<Vec<Option<Route>>>,
+    pub bar: Rc<PlayerBar>,
+    home: HomePage,
+    search: SearchPage,
+    engine: RefCell<Option<Arc<Engine>>>,
+    api: RefCell<Option<Api>>,
+    output: Arc<Output>,
+    events: UnboundedSender<Event>,
+    generation: Cell<u64>,
+    reconnect_attempts: Cell<u32>,
+    pub stores: RefCell<HashMap<String, Rc<Loaded>>>,
+    settings: RefCell<Settings>,
+    save_pending: Cell<bool>,
+    mpris: RefCell<Option<Rc<mpris_server::Player>>>,
+    now: RefCell<Option<NowPlaying>>,
+    /// A link to open once the library has loaded.
+    pending_link: RefCell<Option<String>>,
+}
+
+thread_local! {
+    static CTX: OnceCell<Rc<Ctx>> = const { OnceCell::new() };
+}
+
+pub fn ctx() -> Rc<Ctx> {
+    CTX.with(|c| c.get().expect("UI not built yet").clone())
+}
+
+impl Ctx {
+    pub fn with_engine(&self, f: impl FnOnce(&Engine)) {
+        if let Some(engine) = self.engine.borrow().as_ref() {
+            f(engine);
+        }
+    }
+
+    pub fn api(&self) -> Option<Api> {
+        self.api.borrow().clone()
+    }
+
+    /// The context URI that plays the user's Liked Songs.
+    pub fn collection_uri(&self) -> String {
+        let user = self
+            .engine
+            .borrow()
+            .as_ref()
+            .map(|e| e.session.username())
+            .unwrap_or_default();
+        format!("spotify:user:{user}:collection")
+    }
+}
+
+pub fn toast(message: &str) {
+    let toast = adw::Toast::new(message);
+    toast.set_use_markup(false);
+    toast.set_timeout(3);
+    ctx().toasts.add_toast(toast);
+}
+
+fn spawn_local(fut: impl Future<Output = ()> + 'static) {
+    glib::spawn_future_local(fut);
+}
+
+fn with_mpris<F, Fut>(f: F)
+where
+    F: FnOnce(Rc<mpris_server::Player>) -> Fut,
+    Fut: Future<Output = ()> + 'static,
+{
+    let player = ctx().mpris.borrow().clone();
+    if let Some(player) = player {
+        spawn_local(f(player));
+    }
+}
+
+pub fn startup(_: &adw::Application) {
+    adw::StyleManager::default().set_color_scheme(adw::ColorScheme::ForceDark);
+}
+
+pub fn activate(app: &adw::Application) {
+    if let Some(window) = app.active_window() {
+        window.present();
+        return;
+    }
+
+    let settings = Settings::load();
+    let output = Output::new(settings.volume);
+    let (events, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+
+    let window = adw::ApplicationWindow::builder()
+        .application(app)
+        .title("onIfy")
+        .default_width(1280)
+        .default_height(820)
+        .width_request(360)
+        .height_request(480)
+        .build();
+
+    let login = build_login();
+    let home = HomePage::new();
+    let search = SearchPage::new();
+    let nav = adw::NavigationView::new();
+    nav.add(&home.page);
+    nav.add(&search.page);
+    nav.replace_with_tags(&["home"]);
+    let content = adw::NavigationPage::builder().title("onIfy").child(&nav).build();
+    let (sidebar_page, sidebar) = build_sidebar();
+    let split = adw::NavigationSplitView::builder()
+        .sidebar(&sidebar_page)
+        .content(&content)
+        .min_sidebar_width(220.0)
+        .max_sidebar_width(300.0)
+        .sidebar_width_fraction(0.22)
+        .build();
+    let bar = PlayerBar::new();
+    let main = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
+    split.set_vexpand(true);
+    main.append(&split);
+    main.append(&bar.widget);
+
+    let root = gtk::Stack::builder()
+        .transition_type(gtk::StackTransitionType::Crossfade)
+        .transition_duration(200)
+        .build();
+    root.add_named(&login.widget, Some("login"));
+    root.add_named(&main, Some("main"));
+    // The blurred cover sits underneath everything; the UI floats over it.
+    let backdrop = Backdrop::new();
+    let layers = gtk::Overlay::new();
+    layers.set_child(Some(&backdrop));
+    layers.add_overlay(&root);
+    layers.set_measure_overlay(&root, true);
+    let toasts = adw::ToastOverlay::new();
+    toasts.set_child(Some(&layers));
+    window.set_content(Some(&toasts));
+
+    let narrow = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 760sp").unwrap());
+    narrow.add_setter(&split, "collapsed", Some(&true.to_value()));
+    narrow.add_setter(&bar.side_end, "visible", Some(&false.to_value()));
+    narrow.add_setter(&bar.widget, "homogeneous", Some(&false.to_value()));
+    window.add_breakpoint(narrow);
+
+    let ctx = Rc::new(Ctx {
+        app: app.clone(),
+        window: window.clone(),
+        toasts,
+        backdrop,
+        root,
+        login,
+        split,
+        nav,
+        sidebar,
+        sidebar_routes: RefCell::new(vec![Some(Route::Home), Some(Route::Search), Some(Route::Card(liked_card()))]),
+        bar,
+        home,
+        search,
+        engine: RefCell::default(),
+        api: RefCell::default(),
+        output,
+        events,
+        generation: Cell::new(0),
+        reconnect_attempts: Cell::new(0),
+        stores: RefCell::default(),
+        settings: RefCell::new(settings),
+        save_pending: Cell::new(false),
+        mpris: RefCell::default(),
+        now: RefCell::default(),
+        pending_link: RefCell::default(),
+    });
+    CTX.with(|c| {
+        let _ = c.set(ctx.clone());
+    });
+
+    ctx.bar.set_volume(ctx.settings.borrow().volume);
+    install_actions(app);
+    install_keys(&window);
+    if let Some(row) = ctx.sidebar.row_at_index(0) {
+        ctx.sidebar.select_row(Some(&row));
+    }
+
+    spawn_local(async move {
+        while let Some(event) = event_rx.recv().await {
+            handle_event(event);
+        }
+    });
+
+    window.connect_close_request(|window| {
+        // Let Spotify know this device is going away, then exit.
+        let ctx = self::ctx();
+        ctx.generation.set(ctx.generation.get() + 1);
+        if let Some(engine) = ctx.engine.take() {
+            engine.shutdown();
+            window.set_visible(false);
+            let app = ctx.app.clone();
+            glib::timeout_add_local_once(Duration::from_millis(300), move || app.quit());
+            return glib::Propagation::Stop;
+        }
+        glib::Propagation::Proceed
+    });
+
+    match spotify::cached_credentials() {
+        Some(credentials) => {
+            ctx.root.set_visible_child_name("main");
+            connect(credentials);
+        }
+        None => ctx.root.set_visible_child_name("login"),
+    }
+    window.present();
+
+    spawn_local(async {
+        if let Some(player) = mpris::start().await {
+            self::ctx().mpris.replace(Some(player));
+        }
+    });
+    images::prune_disk_cache();
+}
+
+fn liked_card() -> Card {
+    Card {
+        kind: Kind::Liked,
+        uri: "liked".into(),
+        name: "Liked Songs".into(),
+        subtitle: String::new(),
+        images: Images::default(),
+    }
+}
+
+fn build_login() -> Login {
+    let button = gtk::Button::builder()
+        .label("Log in with Spotify")
+        .halign(gtk::Align::Center)
+        .build();
+    button.add_css_class("pill");
+    button.add_css_class("suggested-action");
+    let status = gtk::Label::builder().wrap(true).justify(gtk::Justification::Center).build();
+    status.add_css_class("dim-label");
+    let content = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .spacing(18)
+        .build();
+    content.append(&button);
+    content.append(&status);
+    let page = adw::StatusPage::builder()
+        .icon_name(APP_ID)
+        .title("onIfy")
+        .description("Spotify, smooth as butter.\nRequires Spotify Premium.")
+        .child(&content)
+        .vexpand(true)
+        .build();
+    let header = adw::HeaderBar::new();
+    header.set_show_title(false);
+    let widget = adw::ToolbarView::new();
+    widget.add_top_bar(&header);
+    widget.set_content(Some(&page));
+
+    button.connect_clicked(|button| {
+        button.set_sensitive(false);
+        let ctx = ctx();
+        ctx.login.status.set_label("Finish logging in in your browser…");
+        spawn_local(async move {
+            let credentials =
+                rt::spawn(async { tokio::task::spawn_blocking(spotify::login_in_browser).await }).await;
+            match credentials {
+                Ok(Ok(credentials)) => {
+                    self::ctx().login.status.set_label("Connecting…");
+                    connect(credentials);
+                }
+                Ok(Err(e)) => show_login(&format!("Login failed: {e}")),
+                Err(e) => show_login(&format!("Login failed: {e}")),
+            }
+        });
+    });
+    Login { widget, button, status }
+}
+
+fn show_login(message: &str) {
+    let ctx = ctx();
+    ctx.login.status.set_label(message);
+    ctx.login.button.set_sensitive(true);
+    ctx.root.set_visible_child_name("login");
+}
+
+fn nav_row(icon: &str, name: &str) -> gtk::ListBoxRow {
+    let content = gtk::Box::builder().spacing(14).build();
+    content.append(&gtk::Image::from_icon_name(icon));
+    let label = gtk::Label::builder().label(name).xalign(0.0).build();
+    content.append(&label);
+    let row = gtk::ListBoxRow::builder().child(&content).build();
+    row.add_css_class("nav");
+    row
+}
+
+fn library_row(card: &Card) -> gtk::ListBoxRow {
+    let content = gtk::Box::builder().spacing(12).build();
+    let cover = if card.kind == Kind::Artist { Cover::round(42) } else { Cover::new(42, 8.0) };
+    cover.set_url(card.images.pick(100));
+    content.append(&cover);
+    let text = gtk::Box::builder()
+        .orientation(gtk::Orientation::Vertical)
+        .valign(gtk::Align::Center)
+        .spacing(1)
+        .build();
+    let name = gtk::Label::builder()
+        .label(&card.name)
+        .xalign(0.0)
+        .ellipsize(gtk::pango::EllipsizeMode::End)
+        .build();
+    name.add_css_class("library-title");
+    let kind = match card.kind {
+        Kind::Album => "Album",
+        Kind::Artist => "Artist",
+        _ => "Playlist",
+    };
+    let detail = gtk::Label::builder().label(kind).xalign(0.0).build();
+    detail.add_css_class("library-detail");
+    text.append(&name);
+    text.append(&detail);
+    content.append(&text);
+    let row = gtk::ListBoxRow::builder().child(&content).build();
+    row.add_css_class("library");
+    row.set_tooltip_text(Some(&card.name));
+    row
+}
+
+fn build_sidebar() -> (adw::NavigationPage, gtk::ListBox) {
+    let list = gtk::ListBox::new();
+    list.add_css_class("navigation-sidebar");
+    list.append(&nav_row("onify-go-home-symbolic", "Home"));
+    list.append(&nav_row("onify-system-search-symbolic", "Search"));
+    list.append(&nav_row("onify-heart-filled-symbolic", "Liked Songs"));
+    list.connect_row_activated(|_, row| {
+        let route = ctx().sidebar_routes.borrow().get(row.index() as usize).cloned().flatten();
+        if let Some(route) = route {
+            navigate(route, true);
+        }
+    });
+
+    let menu = gio::Menu::new();
+    menu.append(Some("Log Out"), Some("app.logout"));
+    menu.append(Some("About onIfy"), Some("app.about"));
+    menu.append(Some("Quit"), Some("app.quit"));
+    let menu_button = gtk::MenuButton::builder()
+        .icon_name("onify-open-menu-symbolic")
+        .menu_model(&menu)
+        .tooltip_text("Main Menu")
+        .build();
+    let brand = gtk::Box::builder().spacing(10).margin_start(6).build();
+    let logo = gtk::Image::from_icon_name(APP_ID);
+    logo.set_pixel_size(26);
+    let name = gtk::Label::new(Some("onIfy"));
+    name.add_css_class("brand");
+    brand.append(&logo);
+    brand.append(&name);
+    let header = adw::HeaderBar::new();
+    header.set_show_title(false);
+    header.pack_start(&brand);
+    header.pack_end(&menu_button);
+    let toolbar = adw::ToolbarView::new();
+    toolbar.add_top_bar(&header);
+    let scroller = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .child(&list)
+        .build();
+    toolbar.set_content(Some(&scroller));
+    let page = adw::NavigationPage::builder().title("onIfy").child(&toolbar).build();
+    page.add_css_class("sidebar");
+    (page, list)
+}
+
+fn fill_sidebar(playlists: &[Card]) {
+    let ctx = ctx();
+    let mut routes = ctx.sidebar_routes.borrow_mut();
+    while routes.len() > 3 {
+        routes.pop();
+        if let Some(row) = ctx.sidebar.row_at_index(3) {
+            ctx.sidebar.remove(&row);
+        }
+    }
+    if playlists.is_empty() {
+        return;
+    }
+    let heading = gtk::Label::builder().label("Your Library").xalign(0.0).build();
+    heading.add_css_class("sidebar-heading");
+    let heading_row = gtk::ListBoxRow::builder()
+        .child(&heading)
+        .activatable(false)
+        .selectable(false)
+        .build();
+    ctx.sidebar.append(&heading_row);
+    routes.push(None);
+    for playlist in playlists {
+        ctx.sidebar.append(&library_row(playlist));
+        routes.push(Some(Route::Card(playlist.clone())));
+    }
+}
+
+fn navigate(route: Route, root: bool) {
+    let ctx = ctx();
+    let tag = route.tag();
+    let on_top = ctx.nav.visible_page().and_then(|p| p.tag()).as_deref() == Some(tag.as_str());
+    if !on_top {
+        if root {
+            match &route {
+                Route::Home | Route::Search => ctx.nav.replace_with_tags(&[tag.as_str()]),
+                Route::Card(card) => ctx.nav.replace(&[page_for(card)]),
+            }
+        } else if stack_has(&ctx.nav, &tag) {
+            ctx.nav.pop_to_tag(&tag);
+        } else {
+            match &route {
+                Route::Home | Route::Search => ctx.nav.push_by_tag(&tag),
+                Route::Card(card) => ctx.nav.push(&page_for(card)),
+            }
+        }
+    }
+    if ctx.split.is_collapsed() {
+        ctx.split.set_show_content(true);
+    }
+    if root {
+        let index = ctx
+            .sidebar_routes
+            .borrow()
+            .iter()
+            .position(|r| r.as_ref().is_some_and(|r| r.tag() == tag));
+        match index.and_then(|i| ctx.sidebar.row_at_index(i as i32)) {
+            Some(row) => ctx.sidebar.select_row(Some(&row)),
+            None => ctx.sidebar.unselect_all(),
+        }
+    }
+    if matches!(route, Route::Search) {
+        ctx.search.entry.grab_focus();
+    }
+}
+
+fn stack_has(nav: &adw::NavigationView, tag: &str) -> bool {
+    nav.navigation_stack()
+        .iter::<adw::NavigationPage>()
+        .flatten()
+        .any(|p| p.tag().as_deref() == Some(tag))
+}
+
+fn page_for(card: &Card) -> adw::NavigationPage {
+    match card.kind {
+        Kind::Artist => pages::artist_page(card),
+        kind => pages::tracks_page(kind, &card.uri, &card.name, &card.images),
+    }
+}
+
+pub fn open_card(card: &Card) {
+    navigate(Route::Card(card.clone()), false);
+}
+
+/// Opens a `spotify:album|artist|playlist:…` URI.
+pub fn open_uri(uri: &str) {
+    let kind = match uri.split(':').nth(1) {
+        Some("album") => Kind::Album,
+        Some("artist") => Kind::Artist,
+        Some("playlist") => Kind::Playlist,
+        _ => return,
+    };
+    let name = match kind {
+        Kind::Album => "Album",
+        Kind::Artist => "Artist",
+        _ => "Playlist",
+    };
+    open_card(&Card {
+        kind,
+        uri: uri.to_owned(),
+        name: name.into(),
+        subtitle: String::new(),
+        images: Images::default(),
+    });
+}
+
+pub fn open_album_of(track_uri: &str) {
+    let Some(api) = ctx().api() else { return };
+    let uri = track_uri.to_owned();
+    spawn_local(async move {
+        match rt::spawn(async move { api.album_of(&uri).await }).await {
+            Ok(card) => open_card(&card),
+            Err(e) => toast(&format!("Couldn't open album: {e}")),
+        }
+    });
+}
+
+pub fn check_liked(uri: &str) {
+    let Some(api) = ctx().api() else { return };
+    let uri = uri.to_owned();
+    spawn_local(async move {
+        let track = uri.clone();
+        if let Ok(liked) = rt::spawn(async move { api.is_liked(&track).await }).await {
+            let ctx = ctx();
+            if ctx.bar.track_uri() == uri {
+                ctx.bar.set_liked(liked);
+            }
+        }
+    });
+}
+
+pub fn set_liked(uri: &str, liked: bool) {
+    let Some(api) = ctx().api() else { return };
+    let uri = uri.to_owned();
+    spawn_local(async move {
+        let track = uri.clone();
+        let result = rt::spawn(async move { api.set_liked(&track, liked).await }).await;
+        let ctx = ctx();
+        match result {
+            Ok(()) => {
+                // Liked Songs reloads fresh next time it's opened.
+                ctx.stores.borrow_mut().remove("liked");
+                toast(if liked { "Added to Liked Songs" } else { "Removed from Liked Songs" });
+            }
+            Err(e) => {
+                if ctx.bar.track_uri() == uri {
+                    ctx.bar.set_liked(!liked);
+                }
+                toast(&format!("Couldn't update Liked Songs: {e}"));
+            }
+        }
+    });
+}
+
+fn connect(credentials: Credentials) {
+    let ctx = ctx();
+    let generation = ctx.generation.get() + 1;
+    ctx.generation.set(generation);
+    let device_id = ctx.settings.borrow().device_id.clone();
+    let (output, events) = (ctx.output.clone(), ctx.events.clone());
+    spawn_local(async move {
+        let started = rt::spawn(Engine::start(credentials, device_id, output, events, generation)).await;
+        let ctx = self::ctx();
+        if ctx.generation.get() != generation {
+            if let Ok(engine) = started {
+                engine.shutdown();
+            }
+            return;
+        }
+        match started {
+            Ok(engine) => {
+                ctx.reconnect_attempts.set(0);
+                let first = ctx.api.borrow().is_none();
+                ctx.api.replace(Some(Api::new(engine.session.clone())));
+                ctx.engine.replace(Some(engine));
+                ctx.root.set_visible_child_name("main");
+                if first {
+                    load_library();
+                }
+            }
+            Err(e) => {
+                log::warn!("connecting failed: {e}");
+                let auth = matches!(e.kind, ErrorKind::Unauthenticated | ErrorKind::PermissionDenied);
+                if auth {
+                    spotify::forget_credentials();
+                    show_login(&format!("Spotify said no: {e}"));
+                } else {
+                    reconnect();
+                }
+            }
+        }
+    });
+}
+
+fn reconnect() {
+    let ctx = ctx();
+    let attempt = ctx.reconnect_attempts.get();
+    ctx.reconnect_attempts.set(attempt + 1);
+    if attempt == 0 {
+        toast("Can't reach Spotify. Retrying…");
+    }
+    let delay = [1, 2, 5, 10, 30][attempt.min(4) as usize];
+    glib::timeout_add_local_once(Duration::from_secs(delay), || {
+        if self::ctx().engine.borrow().is_some() {
+            return;
+        }
+        match spotify::cached_credentials() {
+            Some(credentials) => connect(credentials),
+            None => show_login("Please log in again."),
+        }
+    });
+}
+
+fn load_library() {
+    let Some(api) = ctx().api() else { return };
+    if !api.is_premium() {
+        toast("Playback needs Spotify Premium");
+    }
+    spawn_local(async move {
+        let (library, home) = rt::spawn(async move { tokio::join!(api.library(), api.home()) }).await;
+        let ctx = ctx();
+        match library {
+            Ok(library) => fill_sidebar(&library),
+            Err(e) => toast(&format!("Couldn't load your library: {e}")),
+        }
+        if let Some(link) = ctx.pending_link.take() {
+            open_link(&link);
+        }
+        match home {
+            Ok(home) => ctx.home.fill(&home),
+            Err(e) => {
+                ctx.home.fill(&Default::default());
+                toast(&format!("Couldn't load Home: {e}"));
+            }
+        }
+    });
+}
+
+fn logout() {
+    let ctx = ctx();
+    ctx.generation.set(ctx.generation.get() + 1);
+    if let Some(engine) = ctx.engine.take() {
+        engine.shutdown();
+    }
+    ctx.api.take();
+    ctx.stores.borrow_mut().clear();
+    fill_sidebar(&[]);
+    spotify::forget_credentials();
+    navigate(Route::Home, true);
+    show_login("");
+}
+
+fn handle_event(event: Event) {
+    let ctx = ctx();
+    match event {
+        Event::Track(now) => {
+            track_row::set_now_playing(&now.uri);
+            ctx.bar.set_track(&now);
+            ctx.backdrop.set_cover(now.cover(300));
+            let artists = crate::api::join_names(&now.artists);
+            if ctx.bar.is_playing() {
+                ctx.window.set_title(Some(&format!("{} • {artists}", now.name)));
+            }
+            let mut metadata = Metadata::builder()
+                .title(now.name.clone())
+                .artist(now.artists.iter().map(|a| a.name.clone()))
+                .album(now.album.clone())
+                .length(Time::from_millis(now.duration_ms as i64))
+                .url(format!("https://open.spotify.com/track/{}", id_of(&now.uri)));
+            if let Ok(id) = TrackId::try_from(format!("/dev/orqz/onIfy/track/{}", id_of(&now.uri))) {
+                metadata = metadata.trackid(id);
+            }
+            if let Some(cover) = now.cover(640) {
+                metadata = metadata.art_url(cover.to_owned());
+            }
+            let metadata = metadata.build();
+            with_mpris(|p| async move {
+                let _ = p.set_metadata(metadata).await;
+            });
+            ctx.now.replace(Some(now));
+        }
+        Event::Playing { position_ms } => {
+            ctx.bar.set_playing(true, position_ms);
+            if let Some(now) = ctx.now.borrow().as_ref() {
+                let artists = crate::api::join_names(&now.artists);
+                ctx.window.set_title(Some(&format!("{} • {artists}", now.name)));
+            }
+            with_mpris(move |p| async move {
+                p.set_position(Time::from_millis(position_ms as i64));
+                let _ = p.set_playback_status(PlaybackStatus::Playing).await;
+            });
+        }
+        Event::Paused { position_ms } => {
+            ctx.bar.set_playing(false, position_ms);
+            ctx.window.set_title(Some("onIfy"));
+            with_mpris(move |p| async move {
+                p.set_position(Time::from_millis(position_ms as i64));
+                let _ = p.set_playback_status(PlaybackStatus::Paused).await;
+            });
+        }
+        Event::Position { position_ms } => {
+            ctx.bar.set_position(position_ms);
+            with_mpris(move |p| async move {
+                let time = Time::from_millis(position_ms as i64);
+                p.set_position(time);
+                let _ = p.seeked(time).await;
+            });
+        }
+        Event::Loading => {}
+        Event::Stopped => {
+            ctx.bar.stopped();
+            ctx.window.set_title(Some("onIfy"));
+            with_mpris(|p| async move {
+                let _ = p.set_playback_status(PlaybackStatus::Paused).await;
+            });
+        }
+        Event::Shuffle(shuffle) => {
+            ctx.bar.set_shuffle(shuffle);
+            ctx.with_engine(|e| e.note_shuffle(shuffle));
+            with_mpris(move |p| async move {
+                let _ = p.set_shuffle(shuffle).await;
+            });
+        }
+        Event::Repeat { context, track } => {
+            ctx.bar.set_repeat(context, track);
+            ctx.with_engine(|e| e.note_repeat(context));
+            let status = match (context, track) {
+                (_, true) => LoopStatus::Track,
+                (true, false) => LoopStatus::Playlist,
+                _ => LoopStatus::None,
+            };
+            with_mpris(move |p| async move {
+                let _ = p.set_loop_status(status).await;
+            });
+        }
+        Event::Volume(volume) => {
+            ctx.bar.set_volume(volume);
+            ctx.settings.borrow_mut().volume = volume;
+            if !ctx.save_pending.replace(true) {
+                glib::timeout_add_local_once(Duration::from_secs(1), || {
+                    let ctx = self::ctx();
+                    ctx.save_pending.set(false);
+                    ctx.settings.borrow().save();
+                });
+            }
+            with_mpris(move |p| async move {
+                let _ = p.set_volume(volume as f64 / u16::MAX as f64).await;
+            });
+        }
+        Event::Unavailable => toast("This song isn't available"),
+        Event::Disconnected(generation) => {
+            if generation == ctx.generation.get() {
+                ctx.engine.take();
+                reconnect();
+            }
+        }
+    }
+}
+
+pub fn play_pause() {
+    ctx().bar.toggle_play();
+}
+
+fn nudge_volume(delta: f64) {
+    let ctx = ctx();
+    let volume = ctx.settings.borrow().volume as f64 / u16::MAX as f64;
+    let volume = (volume + delta).clamp(0.0, 1.0);
+    ctx.with_engine(|e| e.set_volume((volume * u16::MAX as f64).round() as u16));
+}
+
+pub fn seek_to(ms: i64) {
+    ctx().with_engine(|e| e.seek(ms.max(0) as u32));
+}
+
+fn install_actions(app: &adw::Application) {
+    let string = Some(glib::VariantTy::STRING);
+    let action = |name: &str, f: fn()| {
+        let a = gio::SimpleAction::new(name, None);
+        a.connect_activate(move |_, _| f());
+        app.add_action(&a);
+    };
+    action("search", || navigate(Route::Search, true));
+    action("play-pause", play_pause);
+    action("next", || ctx().with_engine(|e| e.next()));
+    action("prev", || ctx().with_engine(|e| e.prev()));
+    action("volume-up", || nudge_volume(0.05));
+    action("volume-down", || nudge_volume(-0.05));
+    action("logout", logout);
+    action("quit", || {
+        ctx().window.close();
+    });
+    action("about", || {
+        let about = adw::AboutDialog::builder()
+            .application_name("onIfy")
+            .application_icon(APP_ID)
+            .version(env!("CARGO_PKG_VERSION"))
+            .comments("A native Spotify client that stays smooth and light.")
+            .developer_name("orqz")
+            .license_type(gtk::License::MitX11)
+            .build();
+        about.present(Some(&ctx().window));
+    });
+
+    let with_string = |name: &str, f: fn(&str)| {
+        let a = gio::SimpleAction::new(name, string);
+        a.connect_activate(move |_, v| {
+            if let Some(s) = v.and_then(|v| v.str()) {
+                f(s);
+            }
+        });
+        app.add_action(&a);
+    };
+    with_string("open", open_uri);
+    with_string("copy-text", |text| {
+        ctx().window.clipboard().set_text(text);
+        toast("Link copied");
+    });
+    with_string("queue", |uri| {
+        let Some(api) = ctx().api() else { return };
+        let uri = uri.to_owned();
+        spawn_local(async move {
+            match rt::spawn(async move { api.add_to_queue(&uri).await }).await {
+                Ok(()) => toast("Added to queue"),
+                Err(e) => toast(&format!("Couldn't add to queue: {e}")),
+            }
+        });
+    });
+
+    app.set_accels_for_action("app.search", &["<Ctrl>k", "<Ctrl>l", "<Ctrl>f"]);
+    app.set_accels_for_action("app.next", &["<Ctrl>Right"]);
+    app.set_accels_for_action("app.prev", &["<Ctrl>Left"]);
+    app.set_accels_for_action("app.volume-up", &["<Ctrl>Up"]);
+    app.set_accels_for_action("app.volume-down", &["<Ctrl>Down"]);
+    app.set_accels_for_action("app.quit", &["<Ctrl>q"]);
+}
+
+/// Space plays/pauses from anywhere except while typing.
+fn install_keys(window: &adw::ApplicationWindow) {
+    let keys = gtk::EventControllerKey::new();
+    keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+    keys.connect_key_pressed(|controller, key, _, modifiers| {
+        if key != gdk::Key::space || !modifiers.is_empty() {
+            return glib::Propagation::Proceed;
+        }
+        let typing = controller
+            .widget()
+            .and_then(|w| w.root())
+            .and_then(|r| r.focus())
+            .is_some_and(|f| f.is::<gtk::Text>() || f.is::<gtk::TextView>());
+        if typing || ctx().root.visible_child_name().as_deref() != Some("main") {
+            return glib::Propagation::Proceed;
+        }
+        play_pause();
+        glib::Propagation::Stop
+    });
+    window.add_controller(keys);
+}
+
+pub fn raise() {
+    ctx().window.present();
+}
+
+pub fn quit() {
+    ctx().window.close();
+}
+
+pub fn open_links(app: &adw::Application, files: &[gio::File], _hint: &str) {
+    activate(app);
+    for file in files {
+        let link = file.uri().to_string();
+        if self::ctx().api().is_some() {
+            open_link(&link);
+        } else {
+            self::ctx().pending_link.replace(Some(link));
+        }
+    }
+}
+
+/// Opens `spotify:kind:id` or `https://open.spotify.com/[intl-xx/]kind/id`.
+fn open_link(link: &str) {
+    let uri = match link.strip_prefix("https://open.spotify.com/") {
+        Some(path) => {
+            let path = path.split(['?', '#']).next().unwrap_or_default();
+            let parts: Vec<&str> = path.split('/').filter(|p| !p.starts_with("intl-")).collect();
+            match parts.as_slice() {
+                [kind, id, ..] => format!("spotify:{kind}:{id}"),
+                _ => return,
+            }
+        }
+        None => link.to_owned(),
+    };
+    if uri.starts_with("spotify:track:") {
+        ctx().with_engine(|e| e.play_tracks(vec![uri.clone()], 0));
+    } else {
+        open_uri(&uri);
+    }
+}

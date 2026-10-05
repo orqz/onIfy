@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+  <gresource prefix="/dev/orqz/onIfy">
+    <file compressed="true">style.css</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/edit-clear-symbolic.svg">icons/edit-clear-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/edit-find-symbolic.svg">icons/edit-find-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/go-previous-symbolic.svg">icons/go-previous-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-audio-volume-high-symbolic.svg">icons/onify-audio-volume-high-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-audio-volume-low-symbolic.svg">icons/onify-audio-volume-low-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-audio-volume-medium-symbolic.svg">icons/onify-audio-volume-medium-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-audio-volume-muted-symbolic.svg">icons/onify-audio-volume-muted-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-go-home-symbolic.svg">icons/onify-go-home-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-heart-filled-symbolic.svg">icons/onify-heart-filled-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-heart-symbolic.svg">icons/onify-heart-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-media-playback-pause-symbolic.svg">icons/onify-media-playback-pause-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-media-playback-start-symbolic.svg">icons/onify-media-playback-start-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-media-playlist-repeat-song-symbolic.svg">icons/onify-media-playlist-repeat-song-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-media-playlist-repeat-symbolic.svg">icons/onify-media-playlist-repeat-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-media-playlist-shuffle-symbolic.svg">icons/onify-media-playlist-shuffle-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-media-skip-backward-symbolic.svg">icons/onify-media-skip-backward-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-media-skip-forward-symbolic.svg">icons/onify-media-skip-forward-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-open-menu-symbolic.svg">icons/onify-open-menu-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-playing-symbolic.svg">icons/onify-playing-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-system-search-symbolic.svg">icons/onify-system-search-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/apps/dev.orqz.onIfy.svg">icons/dev.orqz.onIfy.svg</file>
+  </gresource>
+</gresources>

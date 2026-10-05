@@ -1,0 +1,781 @@
+//! Library, playlists, search and catalog pages.
+//!
+//! This talks to the same GraphQL API the official Spotify apps use, with the
+//! session's own access token. (The public Web API is unusable for librespot
+//! clients: its shared quota is permanently exhausted.) Queries are addressed
+//! by hashes that Spotify rotates now and then; when one stops working the
+//! current set is read back out of the web player and cached on disk.
+
+use std::collections::HashMap;
+use std::sync::{Arc, LazyLock, RwLock};
+use std::time::{Duration, Instant};
+
+use bytes::Bytes;
+use http::{Method, Request};
+use librespot_core::session::Session;
+use librespot_core::spotify_uri::SpotifyUri;
+use librespot_metadata::{Metadata, Track as TrackMetadata};
+use serde_json::{Value, json};
+use tokio::sync::{Mutex, Semaphore, mpsc::UnboundedSender};
+
+const PATHFINDER: &str = "https://api-partner.spotify.com/pathfinder/v2/query";
+const WEB_PLAYER: &str = "https://open.spotify.com/";
+const CHUNK_BASE: &str = "https://open.spotifycdn.com/cdn/build/web-player/";
+
+/// Query hashes as of October 2026; refreshed automatically when they rotate.
+const DEFAULT_HASHES: &[(&str, &str)] = &[
+    ("searchDesktop", "1148393611bbc58e84e47aed35ecc731275df9f9eb660956962e352dd3631d89"),
+    ("fetchPlaylist", "8964e8eafb21aa992a7d951d256d83285c04be2105d209262901de70cb97584a"),
+    ("getAlbum", "6a74b456cd1735c9193d9e8ec8cc5184cad7ce13572210315229db3975964361"),
+    ("queryArtistOverview", "9f8134ef565e78621f1e1793555bd6633c5ac144ae0f89604ed3ae3f80b3c8e6"),
+    ("home", "76243c78b0e20ecdbe41b794dec8cbe73f75e585b0a7201b8d2e84578412847a"),
+    ("libraryV3", "390c78e5b951029bad359785e69b07b536a509c581cbcd0aded5e5067f187455"),
+    ("fetchLibraryTracks", "087278b20b743578a6262c2b0b4bcd20d879c503cc359a2285baf083ef944240"),
+    ("areEntitiesInLibrary", "134337999233cc6fdd6b1e6dbf94841409f04a946c5c7b744b09ba0dfe5a85ed"),
+    ("addToLibrary", "1ad0d40b3c09660d818b9e770eb1e84745dfbe941df159a64f8772b6fa2bfc3a"),
+    ("removeFromLibrary", "1ad0d40b3c09660d818b9e770eb1e84745dfbe941df159a64f8772b6fa2bfc3a"),
+];
+
+static HASHES: LazyLock<RwLock<HashMap<String, String>>> = LazyLock::new(|| {
+    let mut map: HashMap<String, String> = DEFAULT_HASHES
+        .iter()
+        .map(|(op, hash)| (op.to_string(), hash.to_string()))
+        .collect();
+    if let Some(saved) = std::fs::read(hashes_path())
+        .ok()
+        .and_then(|b| serde_json::from_slice::<HashMap<String, String>>(&b).ok())
+    {
+        map.extend(saved);
+    }
+    RwLock::new(map)
+});
+static LAST_REFRESH: Mutex<Option<Instant>> = Mutex::const_new(None);
+
+fn hashes_path() -> std::path::PathBuf {
+    crate::spotify::cache_dir().join("graphql.json")
+}
+
+pub type Result<T> = std::result::Result<T, String>;
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Named {
+    pub name: String,
+    pub uri: String,
+}
+
+/// Image URLs with their widths, smallest first.
+#[derive(Debug, Clone, Default)]
+pub struct Images(Vec<(String, u32)>);
+
+impl Images {
+    /// Parses a GraphQL `sources` array.
+    fn parse(sources: &Value) -> Self {
+        let mut list: Vec<(String, u32)> = sources
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|i| {
+                let url = i["url"].as_str()?.to_owned();
+                // Mosaic playlist covers come without a size; they are 640px.
+                let w = i["width"].as_u64().or(i["maxWidth"].as_u64()).unwrap_or(640) as u32;
+                Some((url, w))
+            })
+            .collect();
+        list.sort_by_key(|i| i.1);
+        Self(list)
+    }
+
+    /// The smallest image at least `px` wide, or the largest there is.
+    pub fn pick(&self, px: u32) -> Option<&str> {
+        self.0
+            .iter()
+            .find(|i| i.1 >= px)
+            .or(self.0.last())
+            .map(|i| i.0.as_str())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Track {
+    pub uri: String,
+    pub name: String,
+    pub artists: Vec<Named>,
+    pub album: Named,
+    pub images: Images,
+    pub duration_ms: u32,
+    pub explicit: bool,
+    pub playable: bool,
+    pub number: u32,
+}
+
+impl Track {
+    pub fn artist_names(&self) -> String {
+        join_names(&self.artists)
+    }
+
+    /// Parses a `Track`, or a `TrackResponseWrapper` around one.
+    fn parse(v: &Value, album: Option<(&Named, &Images)>) -> Option<Self> {
+        let (t, wrapper_uri) = if v.get("data").is_some() {
+            (&v["data"], v["_uri"].as_str())
+        } else {
+            (v, None)
+        };
+        if t.is_null() || t["__typename"].as_str().is_some_and(|k| k != "Track") {
+            return None;
+        }
+        let uri = t["uri"].as_str().or(wrapper_uri)?.to_owned();
+        let (album, images) = match album {
+            Some((a, i)) => (a.clone(), i.clone()),
+            None => (
+                Named {
+                    name: str_of(&t["albumOfTrack"]["name"]),
+                    uri: str_of(&t["albumOfTrack"]["uri"]),
+                },
+                Images::parse(&t["albumOfTrack"]["coverArt"]["sources"]),
+            ),
+        };
+        let duration = &t["duration"]["totalMilliseconds"];
+        let duration = duration.as_u64().or(t["trackDuration"]["totalMilliseconds"].as_u64());
+        Some(Self {
+            playable: t["playability"]["playable"].as_bool().unwrap_or(true),
+            name: str_of(&t["name"]),
+            artists: artists(&t["artists"]),
+            album,
+            images,
+            duration_ms: duration.unwrap_or(0) as u32,
+            explicit: t["contentRating"]["label"] == "EXPLICIT",
+            number: t["trackNumber"].as_u64().unwrap_or(0) as u32,
+            uri,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    Playlist,
+    Album,
+    Artist,
+    Liked,
+}
+
+/// Anything that opens a page: a playlist, album or artist.
+#[derive(Debug, Clone)]
+pub struct Card {
+    pub kind: Kind,
+    pub uri: String,
+    pub name: String,
+    pub subtitle: String,
+    pub images: Images,
+}
+
+impl Card {
+    pub fn id(&self) -> &str {
+        id_of(&self.uri)
+    }
+
+    /// Parses a `Playlist`, `Album` or `Artist`, or a response wrapper around one.
+    fn parse(v: &Value) -> Option<Self> {
+        let (d, wrapper_uri) = if v.get("data").is_some() {
+            (&v["data"], v["_uri"].as_str())
+        } else {
+            (v, None)
+        };
+        let uri = d["uri"].as_str().or(wrapper_uri).unwrap_or_default().to_owned();
+        let card = match d["__typename"].as_str()? {
+            "Playlist" => {
+                let description = strip_tags(&str_of(&d["description"]));
+                let owner = str_of(&d["ownerV2"]["data"]["name"]);
+                Self {
+                    kind: Kind::Playlist,
+                    uri,
+                    name: str_of(&d["name"]),
+                    subtitle: if !description.is_empty() {
+                        description
+                    } else if !owner.is_empty() {
+                        format!("By {owner}")
+                    } else {
+                        "Playlist".into()
+                    },
+                    images: Images::parse(&d["images"]["items"][0]["sources"]),
+                }
+            }
+            "Album" => {
+                let year = d["date"]["year"]
+                    .as_u64()
+                    .map(|y| y.to_string())
+                    .unwrap_or_else(|| str_of(&d["date"]["isoString"]).chars().take(4).collect());
+                let artists = join_names(&artists(&d["artists"]));
+                Self {
+                    kind: Kind::Album,
+                    uri,
+                    name: str_of(&d["name"]),
+                    subtitle: [year, artists]
+                        .into_iter()
+                        .filter(|s| !s.is_empty())
+                        .collect::<Vec<_>>()
+                        .join(" • "),
+                    images: Images::parse(&d["coverArt"]["sources"]),
+                }
+            }
+            "Artist" => Self {
+                kind: Kind::Artist,
+                uri,
+                name: str_of(&d["profile"]["name"]),
+                subtitle: "Artist".into(),
+                images: Images::parse(&d["visuals"]["avatarImage"]["sources"]),
+            },
+            _ => return None,
+        };
+        (!card.uri.is_empty() && !card.name.is_empty()).then_some(card)
+    }
+}
+
+/// What a track list page shows above its tracks.
+#[derive(Debug, Clone, Default)]
+pub struct Header {
+    pub title: String,
+    pub subtitle: String,
+    pub images: Images,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SearchResults {
+    pub tracks: Vec<Track>,
+    pub artists: Vec<Card>,
+    pub albums: Vec<Card>,
+    pub playlists: Vec<Card>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ArtistPage {
+    pub name: String,
+    pub followers: u64,
+    pub images: Images,
+    pub top: Vec<Track>,
+    pub albums: Vec<Card>,
+    pub singles: Vec<Card>,
+}
+
+/// Spotify's own home feed: titled rows of playlists, albums and artists.
+#[derive(Debug, Clone, Default)]
+pub struct Home {
+    pub sections: Vec<(String, Vec<Card>)>,
+}
+
+/// Messages from a streaming track list load.
+pub enum Chunk {
+    Header(Header),
+    Tracks(Vec<Track>),
+    Failed(String),
+}
+
+#[derive(Clone)]
+pub struct Api {
+    session: Session,
+}
+
+impl Api {
+    pub fn new(session: Session) -> Self {
+        Self { session }
+    }
+
+    async fn get_text(&self, url: &str) -> Result<String> {
+        let request = Request::get(url).body(Bytes::new()).map_err(|e| e.to_string())?;
+        let body = self.session.http_client().request_body(request).await.map_err(|e| e.to_string())?;
+        String::from_utf8(body.to_vec()).map_err(|e| e.to_string())
+    }
+
+    /// Re-reads the current query hashes out of Spotify's web player.
+    async fn refresh_hashes(&self) {
+        let mut last = LAST_REFRESH.lock().await;
+        if last.is_some_and(|t| t.elapsed() < Duration::from_secs(300)) {
+            return;
+        }
+        *last = Some(Instant::now());
+        log::info!("refreshing GraphQL query hashes from the web player");
+
+        let Ok(html) = self.get_text(WEB_PLAYER).await else { return };
+        let mut found = HashMap::new();
+        for script in find_scripts(&html) {
+            let Ok(js) = self.get_text(&script).await else { continue };
+            extract_hashes(&js, &mut found);
+            // Search lives in a lazily loaded chunk.
+            for chunk in chunk_files(&js, "xpui-routes-search") {
+                if let Ok(js) = self.get_text(&format!("{CHUNK_BASE}{chunk}")).await {
+                    extract_hashes(&js, &mut found);
+                }
+            }
+        }
+        if found.is_empty() {
+            log::warn!("couldn't find any GraphQL hashes in the web player");
+            return;
+        }
+        let mut map = HASHES.write().unwrap();
+        map.extend(found);
+        let _ = std::fs::create_dir_all(crate::spotify::cache_dir());
+        let _ = std::fs::write(hashes_path(), serde_json::to_vec(&*map).unwrap_or_default());
+    }
+
+    async fn query(&self, operation: &str, variables: Value) -> Result<Value> {
+        for attempt in 0..2 {
+            let hash = HASHES.read().unwrap().get(operation).cloned().unwrap_or_default();
+            let token = self.session.login5().auth_token().await.map_err(|e| e.to_string())?;
+            let client_token = self.session.spclient().client_token().await.map_err(|e| e.to_string())?;
+            let body = json!({
+                "variables": variables,
+                "operationName": operation,
+                "extensions": { "persistedQuery": { "version": 1, "sha256Hash": hash } },
+            });
+            let request = Request::builder()
+                .method(Method::POST)
+                .uri(PATHFINDER)
+                .header("Authorization", format!("Bearer {}", token.access_token))
+                .header("client-token", client_token)
+                .header("Content-Type", "application/json;charset=UTF-8")
+                .header("Accept", "application/json")
+                .header("App-Platform", "WebPlayer")
+                .body(Bytes::from(body.to_string()))
+                .map_err(|e| e.to_string())?;
+            let response = self.session.http_client().request_body(request);
+            let response = tokio::time::timeout(Duration::from_secs(20), response)
+                .await
+                .map_err(|_| "Spotify took too long to answer".to_owned())?;
+
+            let stale = match &response {
+                Ok(body) => {
+                    let v: Value = serde_json::from_slice(body).map_err(|e| e.to_string())?;
+                    if !v["data"].is_null() {
+                        return Ok(v["data"].clone());
+                    }
+                    if !v["errors"].to_string().contains("PersistedQueryNotFound") {
+                        return Err(first_error(&v));
+                    }
+                    true
+                }
+                Err(e) => e.to_string().contains("400") || e.to_string().contains("404"),
+            };
+            if stale && attempt == 0 {
+                self.refresh_hashes().await;
+                continue;
+            }
+            return response.map(|_| Value::Null).map_err(|e| e.to_string());
+        }
+        Err("query failed".into())
+    }
+
+    pub fn is_premium(&self) -> bool {
+        self.session
+            .get_user_attribute("type")
+            .is_none_or(|t| t == "premium")
+    }
+
+    /// Everything in the user's library: playlists (folders flattened),
+    /// saved albums and followed artists.
+    pub async fn library(&self) -> Result<Vec<Card>> {
+        let mut cards = Vec::new();
+        let mut offset = 0;
+        loop {
+            let v = self
+                .query(
+                    "libraryV3",
+                    json!({
+                        "filters": [], "order": null, "textFilter": "",
+                        "features": ["LIKED_SONGS", "YOUR_EPISODES"],
+                        "limit": 50, "offset": offset,
+                        "flatten": true, "expandedFolders": [], "folderUri": null,
+                        "includeFoldersWhenFlattening": false,
+                    }),
+                )
+                .await?;
+            let page = &v["me"]["libraryV3"];
+            let items = page["items"].as_array().cloned().unwrap_or_default();
+            cards.extend(items.iter().filter_map(|i| Card::parse(&i["item"])));
+            offset += items.len();
+            let total = page["totalCount"].as_u64().unwrap_or(0) as usize;
+            if items.is_empty() || offset >= total {
+                return Ok(cards);
+            }
+        }
+    }
+
+    pub async fn home(&self) -> Result<Home> {
+        let time_zone = gtk::glib::TimeZone::local().identifier().to_string();
+        let v = self
+            .query(
+                "home",
+                json!({
+                    "homeEndUserIntegration": "INTEGRATION_WEB_PLAYER",
+                    "timeZone": time_zone, "sp_t": "", "facet": "",
+                    "sectionItemsLimit": 12, "includeEpisodeContentRatingsV2": false,
+                }),
+            )
+            .await?;
+        let sections = v["home"]["sectionContainer"]["sections"]["items"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|section| {
+                let title = section["data"]["title"]["transformedLabel"]
+                    .as_str()
+                    .or(section["data"]["title"]["text"].as_str())?
+                    .to_owned();
+                let cards: Vec<Card> = section["sectionItems"]["items"]
+                    .as_array()?
+                    .iter()
+                    .filter_map(|item| Card::parse(&item["content"]))
+                    .collect();
+                (!cards.is_empty()).then_some((title, cards))
+            })
+            .collect();
+        Ok(Home { sections })
+    }
+
+    pub async fn search(&self, query: &str) -> Result<SearchResults> {
+        let v = self
+            .query(
+                "searchDesktop",
+                json!({
+                    "searchTerm": query, "offset": 0, "limit": 10, "numberOfTopResults": 5,
+                    "includeAudiobooks": false, "includeArtistHasConcertsField": false,
+                    "includePreReleases": false, "includeLocalConcertsField": false,
+                    "includeAuthors": false,
+                }),
+            )
+            .await?;
+        let s = &v["searchV2"];
+        let cards = |v: &Value| -> Vec<Card> {
+            v["items"].as_array().into_iter().flatten().filter_map(Card::parse).collect()
+        };
+        Ok(SearchResults {
+            tracks: s["tracksV2"]["items"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|i| Track::parse(&i["item"], None))
+                .collect(),
+            artists: cards(&s["artists"]),
+            albums: cards(&s["albumsV2"]),
+            playlists: cards(&s["playlists"]),
+        })
+    }
+
+    pub async fn artist(&self, id: &str) -> Result<ArtistPage> {
+        let v = self
+            .query(
+                "queryArtistOverview",
+                json!({ "uri": format!("spotify:artist:{id}"), "locale": "", "includePrerelease": true }),
+            )
+            .await?;
+        let a = &v["artistUnion"];
+        let releases = |v: &Value| -> Vec<Card> {
+            v["items"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|i| Card::parse(&i["releases"]["items"][0]))
+                .collect()
+        };
+        let mut albums = releases(&a["discography"]["albums"]);
+        if albums.is_empty() {
+            albums = a["discography"]["popularReleasesAlbums"]["items"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Card::parse)
+                .collect();
+        }
+        Ok(ArtistPage {
+            name: str_of(&a["profile"]["name"]),
+            followers: a["stats"]["followers"].as_u64().unwrap_or(0),
+            images: Images::parse(&a["visuals"]["avatarImage"]["sources"]),
+            top: a["discography"]["topTracks"]["items"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|i| Track::parse(&i["track"], None))
+                .collect(),
+            albums,
+            singles: releases(&a["discography"]["singles"]),
+        })
+    }
+
+    /// Streams a track list page by page, so long lists appear immediately.
+    pub async fn stream_tracks(self, kind: Kind, id: String, tx: UnboundedSender<Chunk>) {
+        if let Err(e) = self.stream_tracks_inner(kind, &id, &tx).await {
+            let _ = tx.send(Chunk::Failed(e));
+        }
+    }
+
+    async fn page(&self, kind: Kind, id: &str, offset: usize, limit: usize) -> Result<Value> {
+        match kind {
+            Kind::Playlist => {
+                self.query(
+                    "fetchPlaylist",
+                    json!({
+                        "uri": format!("spotify:playlist:{id}"), "offset": offset, "limit": limit,
+                        "enableWatchFeedEntrypoint": false,
+                    }),
+                )
+                .await
+            }
+            Kind::Album => {
+                self.query(
+                    "getAlbum",
+                    json!({ "uri": format!("spotify:album:{id}"), "locale": "", "offset": offset, "limit": limit }),
+                )
+                .await
+            }
+            Kind::Liked => self.query("fetchLibraryTracks", json!({ "offset": offset, "limit": limit })).await,
+            Kind::Artist => Err("not a track list".into()),
+        }
+    }
+
+    async fn stream_tracks_inner(&self, kind: Kind, id: &str, tx: &UnboundedSender<Chunk>) -> Result<()> {
+        let send = |chunk| tx.send(chunk).map_err(|_| "page closed".to_owned());
+        let limit = if kind == Kind::Playlist { 100 } else { 50 };
+        let first = self.page(kind, id, 0, limit).await?;
+
+        // Where the tracks live in each kind of response, and how to read them.
+        let tracks_of = move |v: &Value, album: Option<(&Named, &Images)>| -> (Vec<Track>, usize) {
+            let (items, field): (&Value, &str) = match kind {
+                Kind::Playlist => (&v["playlistV2"]["content"]["items"], "itemV2"),
+                Kind::Album => (&v["albumUnion"]["tracksV2"]["items"], "track"),
+                _ => (&v["me"]["library"]["tracks"]["items"], "track"),
+            };
+            let items = items.as_array().map(Vec::as_slice).unwrap_or_default();
+            let tracks = items.iter().filter_map(|i| Track::parse(&i[field], album)).collect();
+            (tracks, items.len())
+        };
+
+        let (total, header, album) = match kind {
+            Kind::Playlist => {
+                let p = &first["playlistV2"];
+                if p["__typename"] != "Playlist" {
+                    return Err("this playlist isn't available".into());
+                }
+                let total = p["content"]["totalCount"].as_u64().unwrap_or(0) as usize;
+                let owner = str_of(&p["ownerV2"]["data"]["name"]);
+                let subtitle = [owner, songs(total)].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>();
+                let header = Header {
+                    title: str_of(&p["name"]),
+                    subtitle: subtitle.join(" • "),
+                    images: Images::parse(&p["images"]["items"][0]["sources"]),
+                };
+                (total, header, None)
+            }
+            Kind::Album => {
+                let a = &first["albumUnion"];
+                let total = a["tracksV2"]["totalCount"].as_u64().unwrap_or(0) as usize;
+                let year: String = str_of(&a["date"]["isoString"]).chars().take(4).collect();
+                let subtitle = [join_names(&artists(&a["artists"])), year, songs(total)];
+                let named = Named {
+                    name: str_of(&a["name"]),
+                    uri: str_of(&a["uri"]),
+                };
+                let images = Images::parse(&a["coverArt"]["sources"]);
+                let header = Header {
+                    title: named.name.clone(),
+                    subtitle: subtitle.into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" • "),
+                    images: images.clone(),
+                };
+                (total, header, Some((named, images)))
+            }
+            _ => {
+                let total = first["me"]["library"]["tracks"]["totalCount"].as_u64().unwrap_or(0) as usize;
+                let header = Header {
+                    title: "Liked Songs".into(),
+                    subtitle: songs(total),
+                    images: Images::default(),
+                };
+                (total, header, None)
+            }
+        };
+        send(Chunk::Header(header))?;
+        let album_ref = album.as_ref().map(|(n, i)| (n, i));
+        let (tracks, count) = tracks_of(&first, album_ref);
+        send(Chunk::Tracks(tracks))?;
+        if count == 0 {
+            return Ok(());
+        }
+
+        // Fetch the remaining pages in parallel, deliver them in order.
+        let permits = Arc::new(Semaphore::new(4));
+        let pages: Vec<_> = (count..total)
+            .step_by(limit)
+            .map(|offset| {
+                let (api, id, permits) = (self.clone(), id.to_owned(), permits.clone());
+                tokio::spawn(async move {
+                    let _permit = permits.acquire().await;
+                    api.page(kind, &id, offset, limit).await
+                })
+            })
+            .collect();
+        for page in pages {
+            let v = page.await.map_err(|e| e.to_string())??;
+            send(Chunk::Tracks(tracks_of(&v, album_ref).0))?;
+        }
+        Ok(())
+    }
+
+    pub async fn is_liked(&self, uri: &str) -> Result<bool> {
+        let v = self.query("areEntitiesInLibrary", json!({ "uris": [uri] })).await?;
+        Ok(v["lookup"][0]["data"]["saved"].as_bool().unwrap_or(false))
+    }
+
+    pub async fn set_liked(&self, uri: &str, liked: bool) -> Result<()> {
+        let operation = if liked { "addToLibrary" } else { "removeFromLibrary" };
+        self.query(operation, json!({ "libraryItemUris": [uri] })).await.map(drop)
+    }
+
+    /// Queues a track on this device through Spotify Connect.
+    pub async fn add_to_queue(&self, uri: &str) -> Result<()> {
+        let device = self.session.device_id().to_owned();
+        let body = json!({
+            "command": {
+                "endpoint": "add_to_queue",
+                "track": { "uri": uri, "metadata": { "is_queued": "true" }, "provider": "queue" },
+                "logging_params": {},
+            }
+        });
+        self.session
+            .spclient()
+            .request_as_json(
+                &Method::POST,
+                &format!("/connect-state/v1/player/command/from/{device}/to/{device}"),
+                None,
+                Some(&body.to_string()),
+            )
+            .await
+            .map(drop)
+            .map_err(|e| e.to_string())
+    }
+
+    /// The album a track belongs to, for "Go to album" from the player bar.
+    pub async fn album_of(&self, track_uri: &str) -> Result<Card> {
+        let uri = SpotifyUri::from_uri(track_uri).map_err(|e| e.to_string())?;
+        let track = TrackMetadata::get(&self.session, &uri).await.map_err(|e| e.to_string())?;
+        Ok(Card {
+            kind: Kind::Album,
+            uri: track.album.id.to_uri().map_err(|e| e.to_string())?,
+            name: track.album.name.clone(),
+            subtitle: String::new(),
+            images: Images::default(),
+        })
+    }
+}
+
+fn artists(v: &Value) -> Vec<Named> {
+    v["items"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|a| Named {
+            name: str_of(&a["profile"]["name"]),
+            uri: str_of(&a["uri"]),
+        })
+        .filter(|a| !a.name.is_empty())
+        .collect()
+}
+
+fn first_error(v: &Value) -> String {
+    v["errors"][0]["message"]
+        .as_str()
+        .unwrap_or("Spotify returned no data")
+        .to_owned()
+}
+
+fn str_of(v: &Value) -> String {
+    v.as_str().unwrap_or_default().to_owned()
+}
+
+/// Playlist descriptions contain links; keep just the text.
+fn strip_tags(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut in_tag = false;
+    for c in s.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            c if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    out.replace("&amp;", "&").replace("&#x27;", "'").replace("&quot;", "\"")
+}
+
+fn songs(n: usize) -> String {
+    match n {
+        0 => String::new(),
+        1 => "1 song".into(),
+        n => format!("{n} songs"),
+    }
+}
+
+pub fn join_names(names: &[Named]) -> String {
+    names.iter().map(|n| n.name.as_str()).collect::<Vec<_>>().join(", ")
+}
+
+pub fn id_of(uri: &str) -> &str {
+    uri.rsplit(':').next().unwrap_or_default()
+}
+
+/// Script URLs of the web player's own bundles.
+fn find_scripts(html: &str) -> Vec<String> {
+    html.split('"')
+        .filter(|s| s.starts_with(CHUNK_BASE) && s.ends_with(".js"))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Collects `"operation","query|mutation","<sha256>"` triples.
+fn extract_hashes(js: &str, found: &mut HashMap<String, String>) {
+    for marker in ["\",\"query\",\"", "\",\"mutation\",\""] {
+        let mut rest = js;
+        while let Some(i) = rest.find(marker) {
+            let before = &rest[..i];
+            let after = &rest[i + marker.len()..];
+            let name = before.rsplit('"').next().unwrap_or_default();
+            let hash = after.get(..64).unwrap_or_default();
+            if !name.is_empty()
+                && name.chars().all(|c| c.is_ascii_alphanumeric())
+                && hash.len() == 64
+                && hash.chars().all(|c| c.is_ascii_hexdigit())
+            {
+                found.insert(name.to_owned(), hash.to_owned());
+            }
+            rest = after;
+        }
+    }
+}
+
+/// File names of a lazily loaded chunk, from the bundle's chunk tables.
+fn chunk_files(js: &str, chunk: &str) -> Vec<String> {
+    let needle = format!(":\"{chunk}\"");
+    let Some(i) = js.find(&needle) else { return Vec::new() };
+    let id: String = js[..i]
+        .chars()
+        .rev()
+        .take_while(|c| c.is_ascii_digit())
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    if id.is_empty() {
+        return Vec::new();
+    }
+    let key = format!("{id}:\"");
+    let mut files = Vec::new();
+    let mut rest = js;
+    while let Some(i) = rest.find(&key) {
+        let start = i + key.len();
+        let candidate = rest.get(start..start + 9).unwrap_or_default();
+        if candidate.len() == 9 && candidate.ends_with('"') && candidate[..8].chars().all(|c| c.is_ascii_hexdigit()) {
+            let file = format!("{chunk}.{}.js", &candidate[..8]);
+            if !files.contains(&file) {
+                files.push(file);
+            }
+        }
+        rest = &rest[start..];
+    }
+    files
+}

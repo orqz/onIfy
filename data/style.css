@@ -1,0 +1,506 @@
+/* onIfy — liquid glass over the playing song's blurred cover.
+   Type: SF Pro. Spacing: 4/8px grid, 36px page gutter. */
+
+:root {
+  /* Recoloured from the current cover at runtime. */
+  --accent-bg-color: #f2f2f2;
+  --accent-fg-color: #101010;
+  --accent-color: #f2f2f2;
+
+  --window-bg-color: #0b0b10;
+  --window-fg-color: #ffffff;
+  --view-bg-color: transparent;
+  --view-fg-color: #ffffff;
+  --headerbar-bg-color: transparent;
+  --headerbar-fg-color: #ffffff;
+  --headerbar-backdrop-color: transparent;
+  --headerbar-shade-color: transparent;
+  --headerbar-border-color: transparent;
+  --sidebar-bg-color: transparent;
+  --sidebar-fg-color: #ffffff;
+  --sidebar-backdrop-color: transparent;
+  --sidebar-shade-color: transparent;
+  --sidebar-border-color: transparent;
+  --secondary-sidebar-bg-color: transparent;
+  --card-bg-color: rgba(255, 255, 255, 0.06);
+  --popover-bg-color: rgba(30, 30, 38, 0.94);
+  --dialog-bg-color: rgba(22, 22, 28, 0.97);
+  --thumbnail-bg-color: rgba(255, 255, 255, 0.06);
+}
+
+window {
+  font-family: "SF Pro Text", "Segoe UI Variable Text", "Adwaita Sans", sans-serif;
+}
+
+/* ---------- Type scale ---------- */
+
+.title-hero {
+  font-family: "SF Pro Display", "Segoe UI Variable Display", sans-serif;
+  font-size: 46px;
+  font-weight: 800;
+  letter-spacing: -1.2px;
+}
+
+.title-page {
+  font-family: "SF Pro Display", "Segoe UI Variable Display", sans-serif;
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: -0.6px;
+}
+
+.title-section {
+  font-family: "SF Pro Display", "Segoe UI Variable Display", sans-serif;
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+}
+
+.eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.meta {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.brand {
+  font-family: "SF Pro Rounded", "SF Pro Display", sans-serif;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.3px;
+}
+
+.dim-label {
+  color: rgba(255, 255, 255, 0.62);
+  opacity: 1;
+}
+
+.numeric {
+  font-feature-settings: "tnum";
+}
+
+/* ---------- Chrome ---------- */
+
+toolbarview,
+navigation-view-page,
+.sidebar-pane,
+statuspage {
+  background: none;
+  box-shadow: none;
+}
+
+headerbar {
+  background: none;
+  box-shadow: none;
+  min-height: 52px;
+}
+
+headerbar button.image-button,
+headerbar menubutton > button {
+  border-radius: 999px;
+  min-width: 34px;
+  min-height: 34px;
+  background-color: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  transition: background-color 160ms ease-out;
+}
+
+headerbar button.image-button:hover,
+headerbar menubutton > button:hover {
+  background-color: rgba(255, 255, 255, 0.15);
+}
+
+.fade-title {
+  transition: opacity 200ms ease-out;
+}
+
+/* ---------- Sidebar ---------- */
+
+list.navigation-sidebar {
+  background: none;
+  padding: 4px 12px 16px 12px;
+}
+
+list.navigation-sidebar > row {
+  margin: 1px 0;
+  border-radius: 12px;
+  transition: background-color 160ms ease-out;
+}
+
+list.navigation-sidebar > row.nav {
+  min-height: 40px;
+  padding: 0 12px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+list.navigation-sidebar > row.library {
+  min-height: 56px;
+  padding: 0 8px;
+}
+
+list.navigation-sidebar > row:hover {
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+list.navigation-sidebar > row:selected {
+  background-color: rgba(255, 255, 255, 0.13);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
+.sidebar-heading {
+  margin: 20px 0 6px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.library-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.library-detail {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+/* ---------- Hero headers ---------- */
+
+.hero-art {
+  border-radius: 14px;
+  box-shadow: 0 22px 54px rgba(0, 0, 0, 0.5);
+}
+
+.liked-tile {
+  border-radius: 14px;
+  background-image: linear-gradient(135deg, #4b1fd8 0%, #8d72f0 55%, #c6b8ff 100%);
+  color: white;
+}
+
+button.hero-play {
+  min-width: 58px;
+  min-height: 58px;
+  padding: 0;
+  background-color: var(--accent-bg-color);
+  color: var(--accent-fg-color);
+  -gtk-icon-size: 24px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 10px 26px rgba(0, 0, 0, 0.4);
+  transition: transform 180ms cubic-bezier(0.2, 0.9, 0.3, 1.2), background-color 700ms ease-out;
+}
+
+button.hero-play:hover {
+  transform: scale(1.06);
+}
+
+button.hero-play:active {
+  transform: scale(0.94);
+}
+
+button.glass-button {
+  min-width: 48px;
+  min-height: 48px;
+  padding: 0;
+  -gtk-icon-size: 20px;
+  color: #ffffff;
+  background-color: rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.26), inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  transition: background-color 160ms ease-out, transform 180ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+button.glass-button:hover {
+  background-color: rgba(255, 255, 255, 0.17);
+  transform: scale(1.05);
+}
+
+/* ---------- Track lists ---------- */
+
+listview.tracks,
+list.tracks {
+  background: none;
+}
+
+listview.tracks {
+  padding-bottom: 28px;
+}
+
+listview.tracks > row,
+list.tracks > row {
+  padding: 0;
+  margin: 0;
+  background: none;
+  box-shadow: none;
+}
+
+.track-columns {
+  margin: 0 24px 6px 24px;
+  padding: 0 12px 10px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09);
+}
+
+.track-row {
+  margin: 0 24px;
+  padding: 0 12px;
+  min-height: 60px;
+  border-radius: 14px;
+  transition: background-color 120ms ease-out;
+}
+
+list.tracks .track-row {
+  margin: 0;
+}
+
+.track-row:hover {
+  background-color: rgba(255, 255, 255, 0.07);
+}
+
+listview.tracks > row:selected .track-row,
+list.tracks > row:selected .track-row {
+  background-color: rgba(255, 255, 255, 0.13);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.track-title {
+  font-size: 15px;
+  font-weight: 500;
+  transition: color 700ms ease-out;
+}
+
+.track-row.playing .track-title {
+  color: var(--accent-color);
+}
+
+.track-artists,
+.track-album {
+  font-size: 13px;
+}
+
+.explicit {
+  background-color: rgba(255, 255, 255, 0.5);
+  color: #111111;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 800;
+  padding: 0 4px;
+  min-height: 14px;
+}
+
+image.accent {
+  color: var(--accent-color);
+  transition: color 700ms ease-out;
+}
+
+/* ---------- Cards and tiles ---------- */
+
+button.card-tile {
+  padding: 12px;
+  border-radius: 20px;
+  background: none;
+  box-shadow: none;
+  transition: background-color 180ms ease-out;
+}
+
+button.card-tile:hover {
+  background-color: rgba(255, 255, 255, 0.07);
+}
+
+button.card-tile:active {
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+.card-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.card-subtitle {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.58);
+}
+
+scrolledwindow.carousel scrollbar {
+  opacity: 0;
+  transition: opacity 200ms ease-out;
+}
+
+scrolledwindow.carousel:hover scrollbar {
+  opacity: 1;
+}
+
+button.shortcut {
+  padding: 8px 14px 8px 8px;
+  border-radius: 14px;
+  background-color: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+  transition: background-color 160ms ease-out;
+}
+
+button.shortcut:hover {
+  background-color: rgba(255, 255, 255, 0.15);
+}
+
+.shortcut-title {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+button.top-result {
+  padding: 22px;
+  border-radius: 22px;
+  background-color: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  transition: background-color 160ms ease-out;
+}
+
+button.top-result:hover {
+  background-color: rgba(255, 255, 255, 0.13);
+}
+
+.pill-label {
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  background-color: rgba(0, 0, 0, 0.32);
+}
+
+entry.search-pill {
+  min-height: 40px;
+  border-radius: 999px;
+  padding: 0 14px;
+  font-size: 15px;
+  background-color: rgba(255, 255, 255, 0.11);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
+entry.search-pill:focus-within {
+  background-color: rgba(255, 255, 255, 0.16);
+  outline: none;
+}
+
+/* ---------- Player capsule (the glass itself is drawn in code) ---------- */
+
+glass.player-bar {
+  margin: 0 14px 14px 14px;
+  padding: 10px 20px 10px 10px;
+  min-height: 76px;
+}
+
+.now-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.now-artists {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.66);
+}
+
+.now-title link,
+.now-artists link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.now-title link:hover,
+.now-artists link:hover {
+  text-decoration: underline;
+}
+
+button.play-button {
+  min-width: 42px;
+  min-height: 42px;
+  padding: 0;
+  background-color: #ffffff;
+  color: #0b0b0b;
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.12), 0 6px 18px rgba(0, 0, 0, 0.35);
+  transition: transform 180ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+button.play-button:hover {
+  transform: scale(1.07);
+}
+
+button.play-button:active {
+  transform: scale(0.92);
+}
+
+.player-bar button.flat {
+  min-width: 34px;
+  min-height: 34px;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.player-bar button.flat:hover {
+  color: #ffffff;
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.player-bar button.flat.active {
+  color: var(--accent-color);
+}
+
+scale.progress {
+  padding: 6px 0;
+}
+
+scale.progress trough {
+  min-height: 4px;
+  border-radius: 2px;
+  background-color: rgba(255, 255, 255, 0.18);
+}
+
+scale.progress highlight {
+  min-height: 4px;
+  border-radius: 2px;
+  background-color: rgba(255, 255, 255, 0.92);
+  transition: background-color 180ms ease-out;
+}
+
+scale.progress:hover highlight {
+  background-color: var(--accent-bg-color);
+}
+
+scale.progress slider {
+  min-width: 12px;
+  min-height: 12px;
+  margin: -4px;
+  background-color: #ffffff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  transition: opacity 140ms ease-out;
+}
+
+scale.progress:hover slider,
+scale.progress:focus-within slider {
+  opacity: 1;
+}
+
+scale.progress:disabled trough {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+/* ---------- Floating surfaces ---------- */
+
+popover > contents {
+  border-radius: 16px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 18px 44px rgba(0, 0, 0, 0.5);
+}
+
+toast {
+  border-radius: 999px;
+  background-color: rgba(30, 30, 38, 0.92);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+statuspage > scrolledwindow > viewport > box > clamp > box > .title {
+  font-family: "SF Pro Display", sans-serif;
+  font-weight: 800;
+}
