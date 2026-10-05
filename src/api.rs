@@ -122,7 +122,7 @@ impl Track {
 
     /// A local file in a playlist. Its URI carries everything:
     /// `spotify:local:{artist}:{album}:{title}:{seconds}`, each part form-encoded.
-    fn from_local_uri(uri: &str) -> Option<Self> {
+    pub fn from_local_uri(uri: &str) -> Option<Self> {
         let decode = |part: &str| -> String {
             url::form_urlencoded::parse(part.as_bytes())
                 .next()

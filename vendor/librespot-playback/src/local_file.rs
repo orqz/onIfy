@@ -68,8 +68,8 @@ fn visit_dir(dir: &Path, accumulator: &mut LocalFileLookup) -> io::Result<()> {
             let lowercase_extension = file_extension.to_lowercase();
 
             if SUPPORTED_FILE_EXTENSIONS.contains(&lowercase_extension.as_str()) {
-                let uri = match get_uri_from_file(path.as_path(), file_extension) {
-                    Ok(uri) => uri,
+                let uris = match get_uris_from_file(path.as_path(), file_extension) {
+                    Ok(uris) => uris,
                     Err(e) => {
                         warn!(
                             "Failed to determine URI of local file {}: {}",
@@ -80,7 +80,9 @@ fn visit_dir(dir: &Path, accumulator: &mut LocalFileLookup) -> io::Result<()> {
                     }
                 };
 
-                accumulator.0.insert(uri, path);
+                for uri in uris {
+                    accumulator.0.insert(uri, path.clone());
+                }
             }
         }
     }
@@ -88,7 +90,10 @@ fn visit_dir(dir: &Path, accumulator: &mut LocalFileLookup) -> io::Result<()> {
     Ok(())
 }
 
-fn get_uri_from_file(audio_path: &Path, file_extension: &str) -> Result<SpotifyUri, Error> {
+/// Every URI the file answers to. onIfy: files without artist and title
+/// tags also answer to names taken from the file name, "Artist - Title"
+/// when it reads like that, so they show up (and scrobble) as real songs.
+fn get_uris_from_file(audio_path: &Path, file_extension: &str) -> Result<Vec<SpotifyUri>, Error> {
     let src = File::open(audio_path)?;
     let mss = MediaSourceStream::new(Box::new(src), Default::default());
 
@@ -112,7 +117,7 @@ fn get_uri_from_file(audio_path: &Path, file_extension: &str) -> Result<SpotifyU
         Some(metadata_rev.tags().to_vec())
     }
 
-    for tag in get_tags(&mut probed).ok_or(Error::internal("Failed to probe audio tags"))? {
+    for tag in get_tags(&mut probed).unwrap_or_default() {
         if let Some(std_key) = tag.std_key {
             match std_key {
                 StandardTagKey::Album => {
@@ -158,10 +163,21 @@ fn get_uri_from_file(audio_path: &Path, file_extension: &str) -> Result<SpotifyU
             .unwrap_or("".to_owned())
     }
 
-    Ok(SpotifyUri::Local {
+    let duration = Duration::from_secs(time.seconds);
+    let uri = |artist: Option<String>, track_title: Option<String>| SpotifyUri::Local {
         artist: format_uri_part(artist),
-        album_title: format_uri_part(album_title),
+        album_title: format_uri_part(album_title.clone()),
         track_title: format_uri_part(track_title),
-        duration: Duration::from_secs(time.seconds),
-    })
+        duration,
+    };
+    let mut uris = vec![uri(artist.clone(), track_title.clone())];
+    if artist.is_none() && track_title.is_none() {
+        if let Some(stem) = audio_path.file_stem().map(|s| s.to_string_lossy().into_owned()) {
+            uris.push(uri(None, Some(stem.clone())));
+            if let Some((a, t)) = stem.split_once(" - ").filter(|(a, t)| !a.trim().is_empty() && !t.trim().is_empty()) {
+                uris.push(uri(Some(a.trim().to_owned()), Some(t.trim().to_owned())));
+            }
+        }
+    }
+    Ok(uris)
 }

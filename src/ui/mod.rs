@@ -208,6 +208,7 @@ pub fn activate(app: &adw::Application) {
     // The blurred cover sits underneath everything, the pages scroll over it,
     // and the player floats on glass above both.
     let backdrop = Backdrop::new();
+    backdrop.set_mood(backdrop::Mood::from_name(&settings.background));
     let host = GlassHost::new(&backdrop, &root, &bar.widget);
     host.set_lane(&content);
     host.add_panel(&sidebar_glass);

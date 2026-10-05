@@ -20,6 +20,8 @@ mod imp {
         pub previous: RefCell<Option<gdk::Texture>>,
         pub mix: Cell<f64>,
         pub fade: RefCell<Option<adw::TimedAnimation>>,
+        /// How much the cover is dimmed: see `Mood`.
+        pub mood: Cell<super::Mood>,
     }
 
     #[glib::object_subclass]
@@ -82,14 +84,19 @@ mod imp {
 
             // Deepen the colour, keep the top airy and the bottom grounded.
             let black = |a: f32| gdk::RGBA::new(0.02, 0.02, 0.04, a);
+            let (top, middle, bottom, edge) = match self.mood.get() {
+                super::Mood::Bright => (0.08, 0.18, 0.44, 0.26),
+                super::Mood::Normal => (0.20, 0.34, 0.58, 0.38),
+                super::Mood::Dark => (0.48, 0.60, 0.78, 0.50),
+            };
             snapshot.append_linear_gradient(
                 &bounds,
                 &graphene::Point::new(0.0, 0.0),
                 &graphene::Point::new(0.0, h),
                 &[
-                    gsk::ColorStop::new(0.0, black(0.20)),
-                    gsk::ColorStop::new(0.5, black(0.34)),
-                    gsk::ColorStop::new(1.0, black(0.58)),
+                    gsk::ColorStop::new(0.0, black(top)),
+                    gsk::ColorStop::new(0.5, black(middle)),
+                    gsk::ColorStop::new(1.0, black(bottom)),
                 ],
             );
             // Vignette.
@@ -102,10 +109,37 @@ mod imp {
                 1.0,
                 &[
                     gsk::ColorStop::new(0.55, black(0.0)),
-                    gsk::ColorStop::new(1.0, black(0.38)),
+                    gsk::ColorStop::new(1.0, black(edge)),
                 ],
             );
         }
+    }
+}
+
+/// How dim the blurred cover behind everything is. Text stays white in all.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Mood {
+    /// The cover's colours glow.
+    Bright,
+    #[default]
+    Normal,
+    /// Deep and moody.
+    Dark,
+}
+
+impl Mood {
+    pub const ALL: [Mood; 3] = [Mood::Bright, Mood::Normal, Mood::Dark];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Mood::Bright => "bright",
+            Mood::Normal => "normal",
+            Mood::Dark => "dark",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Self {
+        Self::ALL.into_iter().find(|m| m.name() == name).unwrap_or_default()
     }
 }
 
@@ -126,6 +160,11 @@ impl Backdrop {
         backdrop.set_hexpand(true);
         backdrop.set_vexpand(true);
         backdrop
+    }
+
+    pub fn set_mood(&self, mood: Mood) {
+        self.imp().mood.set(mood);
+        self.queue_draw();
     }
 
     pub fn set_cover(&self, url: Option<&str>) {

@@ -715,13 +715,15 @@ pub fn tracks_page(kind: Kind, uri: &str, title: &str, images: &Images) -> adw::
         }
     };
 
-    // One click plays a song. Nothing is "selected", so hovering doesn't
-    // highlight rows the way GTK's single-click lists otherwise do.
-    let selection = gtk::NoSelection::new(Some(loaded.store.clone()));
+    // A click selects a song (and shows its play count); its ▶ button on
+    // hover, a double-click or Enter plays it.
+    let selection = gtk::SingleSelection::new(Some(loaded.store.clone()));
+    selection.set_autoselect(false);
+    selection.set_can_unselect(true);
     let list = gtk::ListView::builder()
         .model(&selection)
         .factory(&factory(mode, header_widget.upcast()))
-        .single_click_activate(true)
+        .single_click_activate(false)
         .build();
     list.add_css_class("tracks");
     let store = loaded.store.clone();

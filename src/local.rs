@@ -64,8 +64,7 @@ fn probe(path: &Path, ext: &str) -> Option<Track> {
         .format(&hint, source, &FormatOptions::default(), &MetadataOptions::default())
         .ok()?;
 
-    // Same as librespot: container tags, else tags found while probing. Files
-    // with no tags at all are skipped, because librespot can't play them.
+    // Same as librespot: container tags, else tags found while probing.
     let tags = {
         let mut metadata = probed.format.metadata();
         if metadata.current().is_none() {
@@ -74,7 +73,7 @@ fn probe(path: &Path, ext: &str) -> Option<Track> {
             }
         }
         metadata.skip_to_latest();
-        metadata.current()?.tags().to_vec()
+        metadata.current().map(|m| m.tags().to_vec()).unwrap_or_default()
     };
     let (mut artist, mut album, mut title, mut number) = (None, None, None, 0);
     for tag in tags {
@@ -86,6 +85,17 @@ fn probe(path: &Path, ext: &str) -> Option<Track> {
                 number = tag.value.to_string().split('/').next()?.trim().parse().unwrap_or(0)
             }
             _ => {}
+        }
+    }
+
+    // Untagged: named after the file, "Artist - Title" when it reads like
+    // that, exactly as our librespot names it (vendor/.../local_file.rs), so
+    // the song shows, plays and scrobbles as a real one.
+    if artist.is_none() && title.is_none() {
+        let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        match stem.split_once(" - ").filter(|(a, t)| !a.trim().is_empty() && !t.trim().is_empty()) {
+            Some((a, t)) => (artist, title) = (Some(a.trim().to_owned()), Some(t.trim().to_owned())),
+            None => title = Some(stem),
         }
     }
 

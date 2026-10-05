@@ -10,6 +10,7 @@ use crate::{lastfm, rt};
 
 pub fn present(window: &adw::ApplicationWindow) {
     let page = adw::PreferencesPage::new();
+    page.add(&look_group());
     page.add(&local_group());
     page.add(&discord_group());
     page.add(&lastfm_group());
@@ -36,6 +37,27 @@ fn link_row(title: &str, subtitle: &str, url: &'static str) -> adw::ActionRow {
 
 fn save() {
     ctx().settings.borrow().save();
+}
+
+fn look_group() -> adw::PreferencesGroup {
+    use super::backdrop::Mood;
+    let group = adw::PreferencesGroup::builder().title("Appearance").build();
+    let labels = gtk::StringList::new(&["Bright", "Normal", "Dark"]);
+    let current = Mood::from_name(&ctx().settings.borrow().background);
+    let background = adw::ComboRow::builder()
+        .title("Background")
+        .subtitle("How much the blurred album cover is dimmed")
+        .model(&labels)
+        .selected(Mood::ALL.iter().position(|m| *m == current).unwrap_or(1) as u32)
+        .build();
+    background.connect_selected_notify(|row| {
+        let mood = Mood::ALL.get(row.selected() as usize).copied().unwrap_or_default();
+        ctx().settings.borrow_mut().background = mood.name().to_owned();
+        save();
+        ctx().backdrop.set_mood(mood);
+    });
+    group.add(&background);
+    group
 }
 
 fn local_group() -> adw::PreferencesGroup {

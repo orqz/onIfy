@@ -136,12 +136,24 @@ impl NowPlaying {
             item.covers.into_iter().map(|c| (c.url, c.width)).collect();
         covers.extend(embedded_cover.map(|url| (url, 640)));
         covers.sort_by_key(|c| c.1);
+        // Untagged local files carry the name taken from their file name in
+        // the URI (see local.rs); without tags, that's the best there is.
+        let mut artists = artists;
+        let mut name = item.name;
+        if let Some(named) = crate::api::Track::from_local_uri(&item.uri) {
+            if artists.is_empty() {
+                artists = named.artists;
+            }
+            if name.is_empty() {
+                name = named.name;
+            }
+        }
+        if name.is_empty() {
+            name = file_name.unwrap_or_default();
+        }
         Self {
             uri: item.uri,
-            name: match file_name {
-                Some(file_name) if item.name.is_empty() => file_name,
-                _ => item.name,
-            },
+            name,
             artists,
             album,
             duration_ms: item.duration_ms,

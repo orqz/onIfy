@@ -47,6 +47,9 @@ pub struct PlayerBar {
     cover: Cover,
     title: gtk::Label,
     artists: gtk::Label,
+    /// Title and artists; fades in with each new song, like the cover.
+    text: gtk::Box,
+    text_fade: RefCell<Option<adw::TimedAnimation>>,
     shuffle: gtk::Button,
     play: gtk::Button,
     repeat: gtk::Button,
@@ -55,6 +58,11 @@ pub struct PlayerBar {
     total: gtk::Label,
     volume_button: gtk::Button,
     volume: gtk::Scale,
+    /// In narrow windows the slider hides; hovering the volume icon pops up
+    /// this one instead.
+    volume_pop: gtk::Popover,
+    pop_volume: gtk::Scale,
+    pop_close: RefCell<Option<glib::SourceId>>,
     state: RefCell<State>,
     /// Other shuffle toggles (on playlist pages) that light up with this one.
     shuffle_buttons: RefCell<Vec<glib::WeakRef<gtk::Button>>>,
@@ -180,13 +188,24 @@ impl PlayerBar {
         volume.add_css_class("progress");
         side_end.append(&volume_button);
         side_end.append(&volume);
+        let pop_volume = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 1.0, 0.01);
+        pop_volume.set_width_request(160);
+        pop_volume.add_css_class("progress");
+        let volume_pop = gtk::Popover::builder()
+            .child(&pop_volume)
+            .position(gtk::PositionType::Top)
+            .autohide(false)
+            .has_arrow(false)
+            .build();
+        volume_pop.add_css_class("volume-pop");
+        volume_pop.set_parent(&volume_button);
 
         widget.append(&side_start);
         widget.append(&center);
         widget.append(&side_end);
 
         let extras = vec![shuffle.clone().upcast(), repeat.clone().upcast(), elapsed.clone().upcast(), total.clone().upcast()];
-        let volume_controls = vec![volume_button.clone().upcast(), volume.clone().upcast()];
+        let volume_controls = vec![volume.clone().upcast()];
         let bar = Rc::new(Self {
             widget,
             extras,
@@ -196,6 +215,8 @@ impl PlayerBar {
             cover,
             title,
             artists,
+            text: text.clone(),
+            text_fade: RefCell::default(),
             shuffle,
             play,
             repeat,
@@ -204,6 +225,9 @@ impl PlayerBar {
             total,
             volume_button,
             volume,
+            volume_pop,
+            pop_volume,
+            pop_close: RefCell::default(),
             state: RefCell::default(),
             shuffle_buttons: RefCell::default(),
             tick: RefCell::default(),
@@ -330,6 +354,48 @@ impl PlayerBar {
             }
             glib::Propagation::Proceed
         });
+        let weak = Rc::downgrade(self);
+        self.pop_volume.connect_change_value(move |_, _, value| {
+            if let Some(bar) = weak.upgrade() {
+                let value = value.clamp(0.0, 1.0);
+                bar.state.borrow_mut().muted_from = None;
+                bar.apply_volume(value);
+            }
+            glib::Propagation::Proceed
+        });
+
+        // Hover the volume icon (or its pop-up) to keep the pop-up open;
+        // only when the inline slider is hidden.
+        let hover = |bar: Weak<Self>, entering: bool| {
+            move || {
+                let Some(bar) = bar.upgrade() else { return };
+                if let Some(id) = bar.pop_close.take() {
+                    id.remove();
+                }
+                if entering {
+                    if !bar.volume.is_visible() {
+                        bar.volume_pop.popup();
+                    }
+                    return;
+                }
+                let weak = Rc::downgrade(&bar);
+                let id = glib::timeout_add_local_once(Duration::from_millis(350), move || {
+                    if let Some(bar) = weak.upgrade() {
+                        bar.pop_close.take();
+                        bar.volume_pop.popdown();
+                    }
+                });
+                bar.pop_close.replace(Some(id));
+            }
+        };
+        for widget in [self.volume_button.upcast_ref::<gtk::Widget>(), self.volume_pop.upcast_ref()] {
+            let motion = gtk::EventControllerMotion::new();
+            let enter = hover(Rc::downgrade(self), true);
+            let leave = hover(Rc::downgrade(self), false);
+            motion.connect_enter(move |_, _, _| enter());
+            motion.connect_leave(move |_| leave());
+            widget.add_controller(motion);
+        }
     }
 
     pub fn toggle_play(&self) {
@@ -362,6 +428,7 @@ impl PlayerBar {
 
     fn apply_volume(&self, value: f64) {
         self.state.borrow_mut().volume = value;
+        self.pop_volume.set_value(value);
         self.volume_touched.set(now_us());
         self.volume_button.set_icon_name(volume_icon(value));
         // Heard at once; Spotify (and other devices) get one update when the
@@ -438,6 +505,16 @@ impl PlayerBar {
     }
 
     pub fn set_track(&self, now: &NowPlaying) {
+        if self.state.borrow().track_uri != now.uri {
+            if let Some(fade) = self.text_fade.take() {
+                fade.skip();
+            }
+            let target = adw::PropertyAnimationTarget::new(&self.text, "opacity");
+            let fade = adw::TimedAnimation::new(&self.text, 0.0, 1.0, 280, target);
+            fade.set_easing(adw::Easing::EaseOutCubic);
+            fade.play();
+            self.text_fade.replace(Some(fade));
+        }
         {
             let mut st = self.state.borrow_mut();
             st.has_track = true;
@@ -599,6 +676,7 @@ impl PlayerBar {
         let value = volume as f64 / u16::MAX as f64;
         self.state.borrow_mut().volume = value;
         self.volume.set_value(value);
+        self.pop_volume.set_value(value);
         self.volume_button.set_icon_name(volume_icon(value));
     }
 

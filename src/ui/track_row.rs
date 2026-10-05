@@ -30,6 +30,8 @@ pub enum RowMode {
 pub struct Parts {
     number: gtk::Label,
     playing: gtk::Image,
+    /// Takes the number's place while the pointer is on the row.
+    play: gtk::Button,
     cover: Option<Cover>,
     title: gtk::Label,
     explicit: gtk::Label,
@@ -47,6 +49,9 @@ mod imp {
         pub parts: OnceCell<Parts>,
         pub item: RefCell<Option<glib::BoxedAnyObject>>,
         pub menu: OnceCell<gtk::PopoverMenu>,
+        /// Position in a list view, for its play button.
+        pub position: std::cell::Cell<u32>,
+        pub hovered: std::cell::Cell<bool>,
     }
 
     #[glib::object_subclass]
@@ -132,8 +137,19 @@ impl TrackRow {
         playing.set_halign(gtk::Align::End);
         playing.set_visible(false);
         playing.add_css_class("accent");
+        // Rows don't play on a click (that only selects); this button does.
+        let play = gtk::Button::from_icon_name("onify-media-playback-start-symbolic");
+        play.add_css_class("row-play");
+        play.add_css_class("circular");
+        play.add_css_class("flat");
+        play.set_tooltip_text(Some("Play"));
+        play.set_hexpand(true);
+        play.set_halign(gtk::Align::End);
+        play.set_valign(gtk::Align::Center);
+        play.set_visible(false);
         lead.append(&number);
         lead.append(&playing);
+        lead.append(&play);
         row.append(&lead);
 
         let cover = (mode != RowMode::Album).then(|| {
@@ -179,9 +195,15 @@ impl TrackRow {
         dim(&duration);
         row.append(&duration);
 
+        play.connect_clicked(glib::clone!(
+            #[weak]
+            row,
+            move |_| row.play()
+        ));
         let _ = row.imp().parts.set(Parts {
             number,
             playing,
+            play,
             cover,
             title,
             explicit,
@@ -198,6 +220,8 @@ impl TrackRow {
             #[weak]
             row,
             move |_, _, _| {
+                row.imp().hovered.set(true);
+                row.refresh_playing();
                 let weak = row.downgrade();
                 let id = glib::timeout_add_local_once(PRELOAD_AFTER, move || {
                     HOVER.with_borrow_mut(|h| h.take());
@@ -212,6 +236,14 @@ impl TrackRow {
                 if let Some(old) = HOVER.with_borrow_mut(|h| h.replace(id)) {
                     old.remove();
                 }
+            }
+        ));
+        hover.connect_leave(glib::clone!(
+            #[weak]
+            row,
+            move |_| {
+                row.imp().hovered.set(false);
+                row.refresh_playing();
             }
         ));
         hover.connect_leave(|_| {
@@ -257,6 +289,19 @@ impl TrackRow {
         self.refresh_playing();
     }
 
+    pub fn set_position(&self, position: u32) {
+        self.imp().position.set(position);
+    }
+
+    /// Plays this row's song, in its list's context, as a double-click would.
+    fn play(&self) {
+        if let Some(list_row) = self.parent().and_downcast::<gtk::ListBoxRow>() {
+            list_row.activate();
+        } else {
+            let _ = self.activate_action("list.activate-item", Some(&self.imp().position.get().to_variant()));
+        }
+    }
+
     pub fn track(&self) -> Option<Track> {
         self.imp().item.borrow().as_ref().map(|i| i.borrow::<Track>().clone())
     }
@@ -266,8 +311,10 @@ impl TrackRow {
         let playing = self.imp().item.borrow().as_ref().is_some_and(|item| {
             NOW_PLAYING.with_borrow(|now| !now.is_empty() && item.borrow::<Track>().uri == *now)
         });
-        parts.number.set_visible(!playing);
-        parts.playing.set_visible(playing);
+        let hovered = self.imp().hovered.get();
+        parts.number.set_visible(!playing && !hovered);
+        parts.playing.set_visible(playing && !hovered);
+        parts.play.set_visible(hovered);
         if playing {
             self.add_css_class("playing");
         } else {
@@ -397,6 +444,7 @@ pub fn factory(mode: RowMode, header: gtk::Widget) -> gtk::SignalListItemFactory
             slot.remove(&header);
         }
         row.set_visible(true);
+        row.set_position(item.position());
         let number = if mode == RowMode::Album {
             object.borrow::<Track>().number
         } else {

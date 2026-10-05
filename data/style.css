@@ -336,9 +336,29 @@ list.tracks > row:selected .track-row {
   font-size: 13px;
 }
 
+/* Play counts show for the selected song only. */
 .track-plays {
   font-size: 13px;
   margin-right: 24px;
+  opacity: 0;
+  transition: opacity 150ms ease-out;
+}
+
+listview.tracks > row:selected .track-plays,
+list.tracks > row:selected .track-plays {
+  opacity: 1;
+}
+
+button.row-play {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
+  margin-right: -6px;
+  color: #ffffff;
+}
+
+button.row-play:hover {
+  background-color: rgba(255, 255, 255, 0.14);
 }
 
 .explicit {
@@ -549,6 +569,32 @@ button.play-button:active {
   color: rgba(255, 255, 255, 0.75);
 }
 
+.player-bar button.flat {
+  transition: color 150ms ease-out, background-color 150ms ease-out, transform 160ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+.player-bar button.flat:active,
+button.glass-button:active,
+button.row-play:active {
+  transform: scale(0.9);
+}
+
+button.card-tile,
+button.shortcut,
+button.top-result {
+  transition: background-color 160ms ease-out, transform 180ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+button.card-tile:active,
+button.shortcut:active,
+button.top-result:active {
+  transform: scale(0.97);
+}
+
+list.navigation-sidebar > row:active {
+  transform: scale(0.98);
+}
+
 .player-bar button.flat:hover {
   color: #ffffff;
   background-color: rgba(255, 255, 255, 0.1);
@@ -605,6 +651,11 @@ scale.progress:disabled trough {
 }
 
 /* ---------- Floating surfaces ---------- */
+
+popover.volume-pop > contents {
+  padding: 10px 14px;
+  border-radius: 999px;
+}
 
 popover > contents {
   border-radius: 16px;

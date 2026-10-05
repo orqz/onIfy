@@ -12,6 +12,8 @@ pub struct Settings {
     pub volume: u16,
     pub local_folders: Vec<PathBuf>,
     pub discord_enabled: bool,
+    /// How dim the blurred cover is: "bright", "normal" or "dark".
+    pub background: String,
     pub discord_client_id: String,
     pub lastfm: lastfm::Account,
 }
@@ -38,6 +40,7 @@ impl Settings {
                 None => crate::local::default_folders(),
             },
             discord_enabled: v["discord_enabled"].as_bool().unwrap_or(true),
+            background: text("background"),
             discord_client_id: text("discord_client_id"),
             lastfm: lastfm::Account {
                 api_key: text("lastfm_api_key"),
@@ -58,6 +61,7 @@ impl Settings {
             "volume": self.volume,
             "local_folders": self.local_folders,
             "discord_enabled": self.discord_enabled,
+            "background": self.background,
             "discord_client_id": self.discord_client_id,
             "lastfm_api_key": self.lastfm.api_key,
             "lastfm_secret": self.lastfm.secret,
