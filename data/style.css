@@ -94,6 +94,15 @@ statuspage {
   box-shadow: none;
 }
 
+/* libadwaita's divider between sidebar and content, matched selector for
+   selector so this wins: the floating panels need no divider. */
+.sidebar-pane:dir(ltr),
+.sidebar-pane:dir(rtl),
+.sidebar-pane.end:dir(ltr),
+.sidebar-pane.end:dir(rtl) {
+  box-shadow: none;
+}
+
 headerbar {
   background: none;
   box-shadow: none;
@@ -395,13 +404,13 @@ entry.search-pill:focus-within {
 /* ---------- Player capsule (the glass itself is drawn in code) ---------- */
 
 /* A compact capsule along the bottom of the playlist column, placed by the
-   glass host with the sidebar's 12px gaps. 8px all round the 52px cover
-   (GTK's min-height excludes padding, so the capsule is 68px); the right side
+   glass host with the sidebar's 12px gaps. 8px all round the 46px cover
+   (GTK's min-height excludes padding, so the capsule is 62px); the right side
    has no artwork, so it gets a little more room. PLAYER_SPACE in ui/mod.rs
    keeps the pages clear of it. */
 glass.player-bar {
   padding: 8px 16px 8px 8px;
-  min-height: 52px;
+  min-height: 46px;
 }
 
 .player-bar .caption {
@@ -436,8 +445,8 @@ glass.sidebar-glass {
 }
 
 button.play-button {
-  min-width: 36px;
-  min-height: 36px;
+  min-width: 32px;
+  min-height: 32px;
   padding: 0;
   background-color: #ffffff;
   color: #0b0b0b;
@@ -454,8 +463,8 @@ button.play-button:active {
 }
 
 .player-bar button.flat {
-  min-width: 30px;
-  min-height: 30px;
+  min-width: 28px;
+  min-height: 28px;
   color: rgba(255, 255, 255, 0.75);
 }
 

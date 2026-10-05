@@ -55,9 +55,9 @@ impl Route {
 
 /// Home, Search, Liked Songs and Local Files; library rows follow these.
 const FIXED_ROWS: usize = 4;
-/// Room kept under the pages for the floating player: its 68px capsule, its
-/// 12px bottom margin and an 8px gap, so nothing ever sits behind it.
-const PLAYER_SPACE: i32 = 88;
+/// Room kept under the pages for the floating player: its 62px capsule, its
+/// 12px bottom gap and 8px more, so nothing ever sits behind it.
+const PLAYER_SPACE: i32 = 82;
 
 struct Login {
     widget: adw::ToolbarView,

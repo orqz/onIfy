@@ -58,7 +58,7 @@ pub struct PlayerBar {
 }
 
 /// The cover fills the capsule's height inside its padding (see style.css).
-const COVER: i32 = 52;
+const COVER: i32 = 46;
 
 fn icon_button(icon: &str, tooltip: &str) -> gtk::Button {
     let button = gtk::Button::from_icon_name(icon);
@@ -77,14 +77,14 @@ impl PlayerBar {
     pub fn new() -> Rc<Self> {
         // Three equal columns, like Spotify: the controls stay centred no
         // matter how long the song title is. Corners are concentric: the
-        // capsule's 22px radius minus its 8px padding is the cover's 14px.
-        let widget = Glass::new(gtk::Orientation::Horizontal, 12, 22.0);
+        // capsule's 21px radius minus its 8px padding is the cover's 13px.
+        let widget = Glass::new(gtk::Orientation::Horizontal, 12, 21.0);
         widget.set_homogeneous(true);
         widget.add_css_class("player-bar");
 
         // Left: what's playing.
         let side_start = gtk::Box::builder().spacing(12).build();
-        let cover = Cover::new(COVER, 14.0);
+        let cover = Cover::new(COVER, 13.0);
         cover.set_cursor_from_name(Some("pointer"));
         let text = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
