@@ -6,8 +6,8 @@
 //! then a light tint and the edge lighting that gives the glass its thickness.
 //!
 //! The host holds the backdrop, the page content and one floating panel (the
-//! player), which it centres in a "lane" (the playlist column). Panels inside
-//! the content, like the sidebar, are registered with `add_panel`.
+//! player), which it stretches across a "lane" (the playlist column). Panels
+//! inside the content, like the sidebar, are registered with `add_panel`.
 
 use std::cell::{Cell, OnceCell, RefCell};
 
@@ -15,8 +15,8 @@ use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{gdk, glib, graphene, gsk};
 
-/// The floating panel's widest, including its margins.
-const FLOAT_MAX_WIDTH: i32 = 760;
+/// The gap around floating glass, matching the sidebar panel's margins.
+const GAP: i32 = 12;
 /// Glass magnifies what's behind it a touch, like a thick lens.
 const LENS: f32 = 1.035;
 
@@ -87,19 +87,20 @@ mod imp {
                 child.allocate(width, height, baseline, None);
             }
             if let Some(floating) = self.floating.get().filter(|f| f.is_visible()) {
-                // Centred in the lane (now allocated, along with the content),
-                // resting on the bottom edge; its CSS margins keep it off the edges.
-                let (x, lane_width) = self
+                // Spans the lane (allocated by now, with the content): from
+                // where the sidebar panel's gap ends, or the window edge when
+                // there's no sidebar, to a gap short of the right edge.
+                let lane_x = self
                     .lane
                     .upgrade()
                     .filter(|l| l.is_mapped())
                     .and_then(|l| l.compute_bounds(&*self.obj()))
-                    .map_or((0.0, width as f32), |b| (b.x(), b.width()));
+                    .map_or(0, |b| b.x().round() as i32);
+                let left = if lane_x > 0 { lane_x } else { GAP };
                 let (min, _, _, _) = floating.measure(gtk::Orientation::Horizontal, -1);
-                let w = (lane_width as i32).min(FLOAT_MAX_WIDTH).max(min);
-                let x = x + (lane_width - w as f32).max(0.0) / 2.0;
+                let w = (width - GAP - left).max(min);
                 let (_, h, _, _) = floating.measure(gtk::Orientation::Vertical, w);
-                let at = gsk::Transform::new().translate(&graphene::Point::new(x, (height - h) as f32));
+                let at = gsk::Transform::new().translate(&graphene::Point::new(left as f32, (height - h - GAP) as f32));
                 floating.allocate(w, h, -1, Some(at));
             }
         }

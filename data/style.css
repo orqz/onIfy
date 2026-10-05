@@ -394,12 +394,12 @@ entry.search-pill:focus-within {
 
 /* ---------- Player capsule (the glass itself is drawn in code) ---------- */
 
-/* A compact capsule under the playlist column. 8px all round the 52px cover
+/* A compact capsule along the bottom of the playlist column, placed by the
+   glass host with the sidebar's 12px gaps. 8px all round the 52px cover
    (GTK's min-height excludes padding, so the capsule is 68px); the right side
    has no artwork, so it gets a little more room. PLAYER_SPACE in ui/mod.rs
    keeps the pages clear of it. */
 glass.player-bar {
-  margin: 0 12px 12px 12px;
   padding: 8px 16px 8px 8px;
   min-height: 52px;
 }
