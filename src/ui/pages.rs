@@ -496,7 +496,8 @@ fn load_tracks(kind: Kind, uri: &str) -> Rc<Loaded> {
             let Some(loaded) = weak.upgrade() else { return };
             match chunk {
                 Chunk::Header(header) => {
-                    for listener in loaded.listeners.borrow().iter() {
+                    // The header arrives once; later visits read it directly.
+                    for listener in loaded.listeners.take() {
                         listener(&header);
                     }
                     loaded.header.replace(Some(header));
@@ -541,7 +542,7 @@ fn scan_local(loaded: &Rc<Loaded>) {
             subtitle,
             images: Images::default(),
         };
-        for listener in loaded.listeners.borrow().iter() {
+        for listener in loaded.listeners.take() {
             listener(&header);
         }
         loaded.header.replace(Some(header));
@@ -638,10 +639,6 @@ pub fn tracks_page(kind: Kind, uri: &str, title: &str, images: &Images) -> adw::
             }
         }
     };
-    if let Some(h) = loaded.header.borrow().as_ref() {
-        apply_header(h);
-    }
-    loaded.listeners.borrow_mut().push(Box::new(apply_header));
 
     let selection = gtk::SingleSelection::new(Some(loaded.store.clone()));
     selection.set_autoselect(false);
@@ -676,13 +673,19 @@ pub fn tracks_page(kind: Kind, uri: &str, title: &str, images: &Images) -> adw::
 
     let scroller = scrolled(&list);
     let header = fading_header(title, &scroller.vadjustment(), 200.0);
-    let header_title = header.title_widget().and_downcast::<adw::WindowTitle>();
-    if let Some(window_title) = header_title {
-        loaded.listeners.borrow_mut().push(Box::new(move |h: &Header| {
+    let window_title = header.title_widget().and_downcast::<adw::WindowTitle>().map(|t| t.downgrade());
+    let update = move |h: &Header| {
+        apply_header(h);
+        if let Some(t) = window_title.as_ref().and_then(|w| w.upgrade()) {
             if !h.title.is_empty() {
-                window_title.set_title(&h.title);
+                t.set_title(&h.title);
             }
-        }));
+        }
+    };
+    let ready = loaded.header.borrow().clone();
+    match ready {
+        Some(h) => update(&h),
+        None => loaded.listeners.borrow_mut().push(Box::new(update)),
     }
     let tag = if kind == Kind::Liked { "liked" } else { uri };
     page(title, tag, &scroller, &header)
