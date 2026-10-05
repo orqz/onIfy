@@ -4,6 +4,7 @@ mod backdrop;
 mod cover;
 mod glass;
 mod integrations;
+mod lyrics;
 mod pages;
 mod player_bar;
 mod preferences;
@@ -220,9 +221,25 @@ pub fn activate(app: &adw::Application) {
     narrow.add_setter(&split, "collapsed", Some(&true.to_value()));
     // Collapsed, the sidebar fills the window, so it makes room for the player.
     narrow.add_setter(&sidebar_glass, "margin-bottom", Some(&(PLAYER_SPACE - 12).to_value()));
-    narrow.add_setter(&bar.side_end, "visible", Some(&false.to_value()));
+    for widget in &bar.volume_controls {
+        narrow.add_setter(widget, "visible", Some(&false.to_value()));
+    }
     narrow.add_setter(&bar.widget, "homogeneous", Some(&false.to_value()));
     window.add_breakpoint(narrow);
+    // Phone-width windows: stack page headers, keep only the core controls.
+    let compact = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 560sp").unwrap());
+    compact.add_setter(&split, "collapsed", Some(&true.to_value()));
+    compact.add_setter(&sidebar_glass, "margin-bottom", Some(&(PLAYER_SPACE - 12).to_value()));
+    for widget in &bar.volume_controls {
+        compact.add_setter(widget, "visible", Some(&false.to_value()));
+    }
+    compact.add_setter(&bar.widget, "homogeneous", Some(&false.to_value()));
+    for widget in &bar.extras {
+        compact.add_setter(widget, "visible", Some(&false.to_value()));
+    }
+    compact.connect_apply(|_| pages::set_compact(true));
+    compact.connect_unapply(|_| pages::set_compact(false));
+    window.add_breakpoint(compact);
 
     let ctx = Rc::new(Ctx {
         app: app.clone(),
@@ -264,6 +281,11 @@ pub fn activate(app: &adw::Application) {
     });
 
     ctx.bar.set_volume(ctx.settings.borrow().volume);
+    // The lyrics button lights up while lyrics are showing.
+    ctx.nav.connect_visible_page_notify(|nav| {
+        let open = nav.visible_page().and_then(|p| p.tag()).as_deref() == Some(lyrics::TAG);
+        self::ctx().bar.set_lyrics_open(open);
+    });
     install_actions(app);
     install_keys(&window);
     if let Some(row) = ctx.sidebar.row_at_index(0) {
@@ -555,6 +577,24 @@ fn page_for(card: &Card) -> adw::NavigationPage {
         kind => pages::tracks_page(kind, &card.uri, &card.name, &card.images),
     }
 }
+/// Shows the lyrics, or goes back from them if they're already showing.
+pub fn toggle_lyrics() {
+    let ctx = ctx();
+    let on_top = ctx.nav.visible_page().and_then(|p| p.tag()).as_deref() == Some(lyrics::TAG);
+    if on_top {
+        ctx.nav.pop();
+        return;
+    }
+    if stack_has(&ctx.nav, lyrics::TAG) {
+        ctx.nav.pop_to_tag(lyrics::TAG);
+    } else {
+        ctx.nav.push(&lyrics::page());
+    }
+    if ctx.split.is_collapsed() {
+        ctx.split.set_show_content(true);
+    }
+}
+
 pub fn open_card(card: &Card) {
     navigate(Route::Card(card.clone()), false);
 }
@@ -774,24 +814,35 @@ fn handle_event(event: Event) {
             }
             ctx.now.replace(Some(now.clone()));
             integrations::track_changed(&now);
+            lyrics::track_changed(&now.uri);
         }
         Event::Playing { position_ms } => {
             ctx.bar.set_playing(true, position_ms);
+            // Spotify applies its own idea of the volume when playback moves
+            // here, and ignored any change made before; the user's choice wins.
+            let wanted = (ctx.bar.volume() * u16::MAX as f64).round() as u16;
+            if ctx.output.volume() != wanted {
+                ctx.output.set_volume(wanted);
+                ctx.with_engine(|e| e.set_volume(wanted));
+            }
             if let Some(now) = ctx.now.borrow().as_ref() {
                 let artists = crate::api::join_names(&now.artists);
                 ctx.window.set_title(Some(&format!("{} • {artists}", now.name)));
             }
             integrations::playing(position_ms);
+            lyrics::resync();
         }
         Event::Paused { position_ms } => {
             ctx.bar.set_playing(false, position_ms);
             ctx.window.set_title(Some("onIfy"));
             integrations::paused(position_ms);
+            lyrics::resync();
             restart_if_stale();
         }
         Event::Position { position_ms } => {
             ctx.bar.set_position(position_ms);
             integrations::seeked(position_ms);
+            lyrics::resync();
         }
         Event::Loading => {}
         Event::Stopped => {
@@ -811,7 +862,13 @@ fn handle_event(event: Event) {
             integrations::repeat(context, track);
         }
         Event::Volume(volume) => {
-            ctx.bar.set_volume(volume);
+            if let Some(wanted) = ctx.bar.reported_volume(volume) {
+                ctx.output.set_volume(wanted);
+                ctx.with_engine(|e| e.set_volume(wanted));
+                return;
+            }
+            // The bar may have ignored a stale echo; keep what it shows.
+            let volume = (ctx.bar.volume() * u16::MAX as f64).round() as u16;
             ctx.settings.borrow_mut().volume = volume;
             if !ctx.save_pending.replace(true) {
                 glib::timeout_add_local_once(Duration::from_secs(1), || {
@@ -844,10 +901,8 @@ pub fn play_pause() {
 }
 
 fn nudge_volume(delta: f64) {
-    let ctx = ctx();
-    let volume = ctx.settings.borrow().volume as f64 / u16::MAX as f64;
-    let volume = (volume + delta).clamp(0.0, 1.0);
-    ctx.with_engine(|e| e.set_volume((volume * u16::MAX as f64).round() as u16));
+    let bar = ctx().bar.clone();
+    bar.set_volume_by_user(bar.volume() + delta);
 }
 
 pub fn seek_to(ms: i64) {
@@ -868,6 +923,7 @@ fn install_actions(app: &adw::Application) {
     action("volume-up", || nudge_volume(0.05));
     action("volume-down", || nudge_volume(-0.05));
     action("logout", logout);
+    action("lyrics", toggle_lyrics);
     action("preferences", || preferences::present(&ctx().window));
     action("quit", || {
         ctx().window.close();
@@ -897,6 +953,8 @@ fn install_actions(app: &adw::Application) {
     // Developer aid: with ONIFY_DEV set, `app.dev-render` saves the window as a
     // PNG at 2x, even while it's on another workspace.
     if std::env::var_os("ONIFY_DEV").is_some() {
+        // Plays one song (Spotify or local) as if clicked, for testing.
+        with_string("dev-play", |uri| ctx().with_engine(|e| e.play_tracks(vec![uri.to_owned()], 0)));
         with_string("dev-render", |path| {
             let window = ctx().window.clone();
             let (w, h) = (window.width() as f32, window.height() as f32);

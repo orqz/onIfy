@@ -12,6 +12,7 @@
     <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-folder-music-symbolic.svg">icons/onify-folder-music-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-list-add-symbolic.svg">icons/onify-list-add-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-list-remove-symbolic.svg">icons/onify-list-remove-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-lyrics-symbolic.svg">icons/onify-lyrics-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-go-home-symbolic.svg">icons/onify-go-home-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-heart-filled-symbolic.svg">icons/onify-heart-filled-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-heart-symbolic.svg">icons/onify-heart-symbolic.svg</file>

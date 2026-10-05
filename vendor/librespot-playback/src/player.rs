@@ -1568,9 +1568,10 @@ impl Future for PlayerInternal {
             {
                 let track_id = track_id.clone();
 
+                // onIfy: preload the next song as soon as this one is fully
+                // downloaded, not only in its last 30 s, so skipping is instant.
+                let _ = (duration_ms, stream_position_ms, PRELOAD_NEXT_TRACK_BEFORE_END_DURATION_MS);
                 if (!*suggested_to_preload_next_track)
-                    && ((duration_ms as i64 - stream_position_ms as i64)
-                        < PRELOAD_NEXT_TRACK_BEFORE_END_DURATION_MS as i64)
                     && stream_loader_controller.range_to_end_available()
                 {
                     *suggested_to_preload_next_track = true;

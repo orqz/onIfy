@@ -38,8 +38,12 @@ struct State {
 
 pub struct PlayerBar {
     pub widget: Glass,
-    pub side_end: gtk::Box,
+    /// Hidden when the window is compact: shuffle, repeat and the times.
+    pub extras: Vec<gtk::Widget>,
+    /// Hidden when the window is narrow; lyrics stays.
+    pub volume_controls: Vec<gtk::Widget>,
     pub like: gtk::Button,
+    lyrics: gtk::Button,
     cover: Cover,
     title: gtk::Label,
     artists: gtk::Label,
@@ -56,6 +60,15 @@ pub struct PlayerBar {
     shuffle_buttons: RefCell<Vec<glib::WeakRef<gtk::Button>>>,
     tick: RefCell<Option<glib::SourceId>>,
     seek_debounce: RefCell<Option<glib::SourceId>>,
+    /// Spotify hears of volume changes once the slider rests.
+    volume_debounce: RefCell<Option<glib::SourceId>>,
+    /// When the user last moved the volume (monotonic µs); echoes from
+    /// Spotify within a moment of that are stale and ignored.
+    volume_touched: Cell<i64>,
+    /// A volume the user chose that Spotify hasn't confirmed yet. Spotify
+    /// ignores changes while nothing plays here, then reports its own value
+    /// when playback starts; until it echoes this one, ours wins.
+    pending_volume: Cell<Option<u16>>,
     dragging: Cell<bool>,
 }
 
@@ -73,6 +86,15 @@ fn icon_button(icon: &str, tooltip: &str) -> gtk::Button {
 
 fn now_us() -> i64 {
     glib::monotonic_time()
+}
+
+fn volume_icon(value: f64) -> &'static str {
+    match value {
+        v if v <= 0.0 => "onify-audio-volume-muted-symbolic",
+        v if v < 0.34 => "onify-audio-volume-low-symbolic",
+        v if v < 0.67 => "onify-audio-volume-medium-symbolic",
+        _ => "onify-audio-volume-high-symbolic",
+    }
 }
 
 impl PlayerBar {
@@ -147,8 +169,11 @@ impl PlayerBar {
         center.append(&buttons);
         center.append(&timeline);
 
-        // Right: volume.
+        // Right: lyrics and volume.
         let side_end = gtk::Box::builder().spacing(4).halign(gtk::Align::End).build();
+        let lyrics = icon_button("onify-lyrics-symbolic", "Lyrics");
+        lyrics.connect_clicked(|_| super::toggle_lyrics());
+        side_end.append(&lyrics);
         let volume_button = icon_button("onify-audio-volume-high-symbolic", "Mute");
         let volume = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 1.0, 0.01);
         volume.set_width_request(96);
@@ -160,10 +185,14 @@ impl PlayerBar {
         widget.append(&center);
         widget.append(&side_end);
 
+        let extras = vec![shuffle.clone().upcast(), repeat.clone().upcast(), elapsed.clone().upcast(), total.clone().upcast()];
+        let volume_controls = vec![volume_button.clone().upcast(), volume.clone().upcast()];
         let bar = Rc::new(Self {
             widget,
-            side_end,
+            extras,
+            volume_controls,
             like,
+            lyrics,
             cover,
             title,
             artists,
@@ -179,6 +208,9 @@ impl PlayerBar {
             shuffle_buttons: RefCell::default(),
             tick: RefCell::default(),
             seek_debounce: RefCell::default(),
+            volume_debounce: RefCell::default(),
+            volume_touched: Cell::new(0),
+            pending_volume: Cell::new(None),
             dragging: Cell::new(false),
         });
         bar.connect(&prev, &next);
@@ -330,13 +362,25 @@ impl PlayerBar {
 
     fn apply_volume(&self, value: f64) {
         self.state.borrow_mut().volume = value;
-        self.volume_button.set_icon_name(match value {
-            v if v <= 0.0 => "onify-audio-volume-muted-symbolic",
-            v if v < 0.34 => "onify-audio-volume-low-symbolic",
-            v if v < 0.67 => "onify-audio-volume-medium-symbolic",
-            _ => "onify-audio-volume-high-symbolic",
+        self.volume_touched.set(now_us());
+        self.volume_button.set_icon_name(volume_icon(value));
+        // Heard at once; Spotify (and other devices) get one update when the
+        // slider stops, instead of one per pixel.
+        let volume = (value * u16::MAX as f64).round() as u16;
+        ctx().output.set_volume(volume);
+        if let Some(id) = self.volume_debounce.take() {
+            id.remove();
+        }
+        let id = glib::timeout_add_local_once(Duration::from_millis(250), move || {
+            let ctx = ctx();
+            ctx.bar.volume_debounce.take();
+            ctx.bar.pending_volume.set(Some(volume));
+            ctx.with_engine(|e| e.set_volume(volume));
+            ctx.settings.borrow_mut().volume = volume;
+            ctx.settings.borrow().save();
+            super::integrations::volume(volume);
         });
-        ctx().with_engine(|e| e.set_volume((value * u16::MAX as f64).round() as u16));
+        self.volume_debounce.replace(Some(id));
     }
 
     fn toggle_mute(&self) {
@@ -465,6 +509,27 @@ impl PlayerBar {
         self.set_playing(false, position);
     }
 
+    /// The volume the user chose, 0 to 1.
+    pub fn volume(&self) -> f64 {
+        self.state.borrow().volume
+    }
+
+    /// A volume change from outside the slider: keys or media controls.
+    pub fn set_volume_by_user(&self, value: f64) {
+        let value = value.clamp(0.0, 1.0);
+        self.state.borrow_mut().muted_from = None;
+        self.volume.set_value(value);
+        self.apply_volume(value);
+    }
+
+    pub fn set_lyrics_open(&self, open: bool) {
+        if open {
+            self.lyrics.add_css_class("active");
+        } else {
+            self.lyrics.remove_css_class("active");
+        }
+    }
+
     pub fn toggle_shuffle(&self) {
         let shuffle = !self.state.borrow().shuffle;
         self.set_shuffle(shuffle);
@@ -511,18 +576,30 @@ impl PlayerBar {
         }
     }
 
+    /// Spotify reported `volume`. Returns the volume to insist on instead,
+    /// if the user chose one Spotify hasn't caught up with.
+    pub fn reported_volume(&self, volume: u16) -> Option<u16> {
+        match self.pending_volume.get() {
+            Some(pending) if pending != volume => Some(pending),
+            _ => {
+                self.pending_volume.set(None);
+                self.set_volume(volume);
+                None
+            }
+        }
+    }
+
     pub fn set_volume(&self, volume: u16) {
+        // Spotify echoes changes back a little later; don't let an old value
+        // drag the slider back while it's being moved.
+        let recent = now_us() - self.volume_touched.get() < 1_500_000;
+        if recent || self.volume_debounce.borrow().is_some() {
+            return;
+        }
         let value = volume as f64 / u16::MAX as f64;
         self.state.borrow_mut().volume = value;
-        if !self.volume.has_focus() {
-            self.volume.set_value(value);
-        }
-        self.volume_button.set_icon_name(match value {
-            v if v <= 0.0 => "onify-audio-volume-muted-symbolic",
-            v if v < 0.34 => "onify-audio-volume-low-symbolic",
-            v if v < 0.67 => "onify-audio-volume-medium-symbolic",
-            _ => "onify-audio-volume-high-symbolic",
-        });
+        self.volume.set_value(value);
+        self.volume_button.set_icon_name(volume_icon(value));
     }
 
     pub fn position_ms(&self) -> u32 {

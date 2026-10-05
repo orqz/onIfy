@@ -8,7 +8,7 @@ use adw::prelude::*;
 use gtk::{gio, glib};
 
 use super::cover::Cover;
-use super::track_row::{HeaderSlot, RowMode, column_header, factory, objects, short_list};
+use super::track_row::{HeaderSlot, RowMode, column_header, factory, group_digits, objects, short_list};
 use super::{ctx, open_card};
 use crate::api::{Card, Chunk, Header, Home, Images, Kind, SearchResults, Track, id_of};
 use crate::rt;
@@ -103,6 +103,34 @@ struct Hero {
     actions: gtk::Box,
 }
 
+thread_local! {
+    /// Every page header, so a narrow window can stack them all.
+    static HEROES: RefCell<Vec<glib::WeakRef<gtk::Box>>> = const { RefCell::new(Vec::new()) };
+    static COMPACT: Cell<bool> = const { Cell::new(false) };
+}
+
+fn apply_compact(hero: &gtk::Box, compact: bool) {
+    // Cover above the title when there's no room for them side by side.
+    hero.set_orientation(if compact { gtk::Orientation::Vertical } else { gtk::Orientation::Horizontal });
+    hero.set_spacing(if compact { 20 } else { 32 });
+    if compact {
+        hero.add_css_class("compact");
+    } else {
+        hero.remove_css_class("compact");
+    }
+}
+
+/// Called as the window crosses the compact width.
+pub fn set_compact(compact: bool) {
+    COMPACT.set(compact);
+    HEROES.with_borrow_mut(|heroes| {
+        heroes.retain(|h| h.upgrade().is_some());
+        for hero in heroes.iter().filter_map(|h| h.upgrade()) {
+            apply_compact(&hero, compact);
+        }
+    });
+}
+
 fn hero(eyebrow: &str, title: &str, art: &impl IsA<gtk::Widget>) -> Hero {
     let widget = gtk::Box::builder()
         .spacing(32)
@@ -112,6 +140,8 @@ fn hero(eyebrow: &str, title: &str, art: &impl IsA<gtk::Widget>) -> Hero {
         .margin_end(GUTTER)
         .build();
     widget.add_css_class("hero");
+    apply_compact(&widget, COMPACT.get());
+    HEROES.with_borrow_mut(|heroes| heroes.push(widget.downgrade()));
     let art_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     art_box.add_css_class("hero-art");
     art_box.set_valign(gtk::Align::Center);
@@ -641,13 +671,13 @@ pub fn tracks_page(kind: Kind, uri: &str, title: &str, images: &Images) -> adw::
         }
     };
 
-    let selection = gtk::SingleSelection::new(Some(loaded.store.clone()));
-    selection.set_autoselect(false);
-    selection.set_can_unselect(true);
+    // One click plays a song. Nothing is "selected", so hovering doesn't
+    // highlight rows the way GTK's single-click lists otherwise do.
+    let selection = gtk::NoSelection::new(Some(loaded.store.clone()));
     let list = gtk::ListView::builder()
         .model(&selection)
         .factory(&factory(mode, header_widget.upcast()))
-        .single_click_activate(false)
+        .single_click_activate(true)
         .build();
     list.add_css_class("tracks");
     let store = loaded.store.clone();
@@ -724,7 +754,10 @@ pub fn artist_page(card: &Card) -> adw::NavigationPage {
             };
             avatar.set_url(artist.images.pick(480));
             title.set_label(&artist.name);
-            if artist.followers > 0 {
+            // Like Spotify: monthly listeners, else followers.
+            if artist.monthly_listeners > 0 {
+                subtitle.set_label(&format!("{} monthly listeners", group_digits(artist.monthly_listeners)));
+            } else if artist.followers > 0 {
                 subtitle.set_label(&format!("{} followers", group_digits(artist.followers)));
             }
             if !artist.top.is_empty() {
@@ -754,16 +787,4 @@ pub fn artist_page(card: &Card) -> adw::NavigationPage {
     let scroller = scrolled(&body);
     let header = fading_header(&card.name, &scroller.vadjustment(), 200.0);
     page(&card.name, &card.uri, &scroller, &header)
-}
-
-fn group_digits(n: u64) -> String {
-    let s = n.to_string();
-    let mut out = String::new();
-    for (i, c) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i) % 3 == 0 {
-            out.push(',');
-        }
-        out.push(c);
-    }
-    out
 }

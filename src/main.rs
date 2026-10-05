@@ -2,6 +2,7 @@
 
 mod api;
 mod audio;
+mod covers;
 mod discord;
 mod images;
 mod lastfm;

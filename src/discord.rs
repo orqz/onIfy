@@ -2,9 +2,10 @@
 //! progress bar. Speaks Discord's local IPC protocol, so it works with the
 //! official client and with arRPC-based clients (Vesktop, onCord) alike.
 
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 
@@ -164,7 +165,30 @@ fn clip(s: &str) -> String {
     s
 }
 
+/// Discord only shows covers by link, so local covers (`file://`) are
+/// uploaded once and their links reused until shortly before they expire.
+fn shareable_cover(cover: &str, uploads: &mut HashMap<String, (String, Instant)>) -> Option<String> {
+    if !cover.starts_with("file://") {
+        return Some(cover.to_owned());
+    }
+    let fresh = crate::covers::KEEP.saturating_sub(Duration::from_secs(10 * 60));
+    if let Some((link, _)) = uploads.get(cover).filter(|(_, at)| at.elapsed() < fresh) {
+        return Some(link.clone());
+    }
+    match crate::rt::handle().block_on(crate::covers::upload(cover)) {
+        Ok(link) => {
+            uploads.insert(cover.to_owned(), (link.clone(), Instant::now()));
+            Some(link)
+        }
+        Err(e) => {
+            log::warn!("couldn't share local cover with Discord: {e}");
+            None
+        }
+    }
+}
+
 fn run(rx: Receiver<Message>, mut client_id: String) {
+    let mut uploads = HashMap::new();
     let mut stream: Option<Stream> = None;
     let mut wanted: Option<Presence> = None;
     let mut dirty = false;
@@ -208,9 +232,14 @@ fn run(rx: Receiver<Message>, mut client_id: String) {
         }
         let Some(s) = stream.as_mut() else { continue };
         nonce += 1;
+        // Only now, connected and with presence on, does a local cover get uploaded.
+        let shown = wanted.clone().map(|mut p| {
+            p.cover = p.cover.and_then(|c| shareable_cover(&c, &mut uploads));
+            p
+        });
         let payload = json!({
             "cmd": "SET_ACTIVITY",
-            "args": { "pid": std::process::id(), "activity": wanted.as_ref().map(activity) },
+            "args": { "pid": std::process::id(), "activity": shown.as_ref().map(activity) },
             "nonce": nonce.to_string(),
         });
         let ok = send(s, 1, &payload).is_ok() && receive(s).is_ok();

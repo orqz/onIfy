@@ -35,6 +35,7 @@ pub struct Parts {
     explicit: gtk::Label,
     artists: gtk::Label,
     album: gtk::Label,
+    plays: gtk::Label,
     duration: gtk::Label,
 }
 
@@ -161,6 +162,12 @@ impl TrackRow {
         columns.append(&album);
         row.append(&columns);
 
+        let plays = gtk::Label::builder().xalign(1.0).visible(false).build();
+        plays.add_css_class("numeric");
+        plays.add_css_class("track-plays");
+        dim(&plays);
+        row.append(&plays);
+
         let duration = gtk::Label::builder().width_chars(6).xalign(1.0).build();
         duration.add_css_class("numeric");
         dim(&duration);
@@ -174,6 +181,7 @@ impl TrackRow {
             explicit,
             artists,
             album,
+            plays,
             duration,
         });
 
@@ -202,6 +210,8 @@ impl TrackRow {
             parts.artists.set_label(&track.artist_names());
             parts.album.set_label(&track.album.name);
             parts.duration.set_label(&format_duration(track.duration_ms));
+            parts.plays.set_visible(track.plays > 0);
+            parts.plays.set_label(&group_digits(track.plays));
             if let Some(cover) = &parts.cover {
                 cover.set_url(track.images.pick(64));
             }
@@ -263,6 +273,19 @@ impl TrackRow {
         popover.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
         popover.popup();
     }
+}
+
+/// 1234567 → "1,234,567".
+pub fn group_digits(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
 }
 
 pub fn format_duration(ms: u32) -> String {

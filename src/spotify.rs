@@ -95,8 +95,10 @@ pub struct NowPlaying {
 
 impl NowPlaying {
     fn from_item(item: AudioItem) -> Self {
-        // Untagged local files go by their file name, as in the Local Files list.
+        // Untagged local files go by their file name, as in the Local Files
+        // list; their cover is the picture embedded in the file.
         let mut file_name = None;
+        let mut embedded_cover = None;
         let (artists, album) = match item.unique_fields {
             UniqueFields::Track { artists, album, .. } => (
                 artists
@@ -117,6 +119,7 @@ impl NowPlaying {
             ),
             UniqueFields::Local { artists, album, path, .. } => {
                 file_name = path.file_stem().map(|s| s.to_string_lossy().into_owned());
+                embedded_cover = crate::covers::embedded(&path);
                 (
                     artists
                         .map(|name| Named {
@@ -131,6 +134,7 @@ impl NowPlaying {
         };
         let mut covers: Vec<(String, i32)> =
             item.covers.into_iter().map(|c| (c.url, c.width)).collect();
+        covers.extend(embedded_cover.map(|url| (url, 640)));
         covers.sort_by_key(|c| c.1);
         Self {
             uri: item.uri,

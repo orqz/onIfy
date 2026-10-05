@@ -200,8 +200,11 @@ async fn fetch(url: String, px: u32) -> Option<Decoded> {
     url.hash(&mut hasher);
     let path = disk_dir().join(format!("{:016x}", hasher.finish()));
 
-    let bytes = match tokio::fs::read(&path).await {
+    // Local covers are already files; read them straight from disk.
+    let local = url.strip_prefix("file://").map(PathBuf::from);
+    let bytes = match tokio::fs::read(local.as_ref().unwrap_or(&path)).await {
         Ok(b) => Bytes::from(b),
+        Err(_) if local.is_some() => return None,
         Err(_) => {
             let request = http::Request::get(&url).body(Bytes::new()).ok()?;
             let bytes = HTTP.request_body(request).await.ok()?;

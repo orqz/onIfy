@@ -54,10 +54,7 @@ pub async fn start() -> Option<Rc<Player>> {
         };
         ctx().with_engine(|e| e.set_repeat(context, track));
     });
-    player.connect_set_volume(|_, volume| {
-        let volume = (volume.clamp(0.0, 1.0) * u16::MAX as f64).round() as u16;
-        ctx().with_engine(|e| e.set_volume(volume));
-    });
+    player.connect_set_volume(|_, volume| ctx().bar.set_volume_by_user(volume));
     player.connect_raise(|_| ui::raise());
     player.connect_quit(|_| ui::quit());
 

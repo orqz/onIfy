@@ -131,6 +131,16 @@ impl Output {
     pub fn mixer(self: &Arc<Self>) -> Arc<dyn Mixer> {
         Arc::new(OutputMixer(self.clone()))
     }
+
+    pub fn volume(&self) -> u16 {
+        self.raw_volume.load(Ordering::Relaxed)
+    }
+
+    /// Takes effect on the next audio slice, ahead of the player hearing of it.
+    pub fn set_volume(&self, volume: u16) {
+        self.raw_volume.store(volume, Ordering::Relaxed);
+        self.gain.store(volume_to_gain(volume).to_bits(), Ordering::Relaxed);
+    }
 }
 
 /// PipeWire/PulseAudio: a thread pushes 10 ms slices into a ~40 ms server
@@ -351,14 +361,11 @@ impl Output {
     }
 }
 
-/// Same curve as librespot's default logarithmic volume control (60 dB).
+/// A cubic curve, like desktop volume sliders: even steps in loudness all the
+/// way along. (A 60 dB log curve left the bottom third of the slider silent.)
 fn volume_to_gain(volume: u16) -> f32 {
     let v = volume as f32 / u16::MAX as f32;
-    if v <= 0.0 {
-        0.0
-    } else {
-        (1000f32.powf(v) - 1.0) / 999.0
-    }
+    v * v * v
 }
 
 struct OutputSink(Arc<Output>);
@@ -405,10 +412,7 @@ impl Mixer for OutputMixer {
     }
 
     fn set_volume(&self, volume: u16) {
-        self.0.raw_volume.store(volume, Ordering::Relaxed);
-        self.0
-            .gain
-            .store(volume_to_gain(volume).to_bits(), Ordering::Relaxed);
+        self.0.set_volume(volume);
     }
 
     fn get_soft_volume(&self) -> Box<dyn VolumeGetter + Send> {

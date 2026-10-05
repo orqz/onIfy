@@ -85,6 +85,11 @@ impl Images {
         Self(list)
     }
 
+    /// One image, e.g. a local file's embedded cover.
+    pub fn single(url: String, width: u32) -> Self {
+        Self(vec![(url, width)])
+    }
+
     /// The smallest image at least `px` wide, or the largest there is.
     pub fn pick(&self, px: u32) -> Option<&str> {
         self.0
@@ -106,6 +111,8 @@ pub struct Track {
     pub explicit: bool,
     pub playable: bool,
     pub number: u32,
+    /// Streams, where Spotify reports them (an artist's popular songs).
+    pub plays: u64,
 }
 
 impl Track {
@@ -142,6 +149,7 @@ impl Track {
             explicit: false,
             playable: true,
             number: 0,
+            plays: 0,
         })
     }
 
@@ -188,6 +196,11 @@ impl Track {
             duration_ms: duration.unwrap_or(0) as u32,
             explicit: t["contentRating"]["label"] == "EXPLICIT",
             number: t["trackNumber"].as_u64().unwrap_or(0) as u32,
+            plays: t["playcount"]
+                .as_str()
+                .and_then(|p| p.parse().ok())
+                .or(t["playcount"].as_u64())
+                .unwrap_or(0),
             uri,
         })
     }
@@ -275,6 +288,14 @@ impl Card {
     }
 }
 
+/// A song's lyrics: each line with the time it starts, if they're synced.
+#[derive(Debug, Clone)]
+pub struct Lyrics {
+    pub synced: bool,
+    pub lines: Vec<(u32, String)>,
+    pub provider: String,
+}
+
 /// What a track list page shows above its tracks.
 #[derive(Debug, Clone, Default)]
 pub struct Header {
@@ -295,6 +316,7 @@ pub struct SearchResults {
 pub struct ArtistPage {
     pub name: String,
     pub followers: u64,
+    pub monthly_listeners: u64,
     pub images: Images,
     pub top: Vec<Track>,
     pub albums: Vec<Card>,
@@ -532,6 +554,7 @@ impl Api {
         Ok(ArtistPage {
             name: str_of(&a["profile"]["name"]),
             followers: a["stats"]["followers"].as_u64().unwrap_or(0),
+            monthly_listeners: a["stats"]["monthlyListeners"].as_u64().unwrap_or(0),
             images: Images::parse(&a["visuals"]["avatarImage"]["sources"]),
             top: a["discography"]["topTracks"]["items"]
                 .as_array()
@@ -693,6 +716,43 @@ impl Api {
             .await
             .map(drop)
             .map_err(|e| e.to_string())
+    }
+
+    /// The song's lyrics from Spotify (Musixmatch), or `None` if it has none.
+    pub async fn lyrics(&self, track_uri: &str) -> Result<Option<Lyrics>> {
+        let endpoint = format!(
+            "/color-lyrics/v2/track/{}?format=json&vocalRemoval=false&market=from_token",
+            id_of(track_uri)
+        );
+        let mut headers = http::HeaderMap::new();
+        headers.insert("app-platform", http::HeaderValue::from_static("WebPlayer"));
+        let bytes = match self.session.spclient().request_as_json(&Method::GET, &endpoint, Some(headers), None).await {
+            Ok(bytes) => bytes,
+            Err(e) if e.kind == librespot_core::error::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e.to_string()),
+        };
+        if bytes.is_empty() {
+            return Ok(None);
+        }
+        let v: Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+        let l = &v["lyrics"];
+        let lines: Vec<(u32, String)> = l["lines"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|line| {
+                let start = line["startTimeMs"].as_str().and_then(|t| t.parse().ok()).unwrap_or(0);
+                (start, str_of(&line["words"]))
+            })
+            .collect();
+        if lines.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(Lyrics {
+            synced: l["syncType"] == "LINE_SYNCED",
+            lines,
+            provider: str_of(&l["providerDisplayName"]),
+        }))
     }
 
     /// The album a track belongs to, for "Go to album" from the player bar.

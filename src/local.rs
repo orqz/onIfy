@@ -112,10 +112,11 @@ fn probe(path: &Path, ext: &str) -> Option<Track> {
             name: album.unwrap_or_default(),
             uri: String::new(),
         },
-        images: Images::default(),
+        images: crate::covers::embedded(path).map(|url| Images::single(url, 640)).unwrap_or_default(),
         duration_ms: (time.seconds * 1000 + (time.frac * 1000.0) as u64) as u32,
         explicit: false,
         playable: true,
         number,
+        plays: 0,
     })
 }
