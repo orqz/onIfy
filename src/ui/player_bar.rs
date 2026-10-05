@@ -555,6 +555,17 @@ impl PlayerBar {
     }
 
     pub fn set_playing(&self, playing: bool, position_ms: u32) {
+        // A little pop when it flips between play and pause.
+        if self.state.borrow().playing != playing {
+            self.play.remove_css_class("pop");
+            self.play.add_css_class("pop");
+            let play = self.play.downgrade();
+            glib::timeout_add_local_once(Duration::from_millis(320), move || {
+                if let Some(play) = play.upgrade() {
+                    play.remove_css_class("pop");
+                }
+            });
+        }
         {
             let mut st = self.state.borrow_mut();
             st.playing = playing;

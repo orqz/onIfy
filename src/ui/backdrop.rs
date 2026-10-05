@@ -22,6 +22,8 @@ mod imp {
         pub fade: RefCell<Option<adw::TimedAnimation>>,
         /// How much the cover is dimmed: see `Mood`.
         pub mood: Cell<super::Mood>,
+        /// Off: a plain background, and no cover images kept for it.
+        pub covers_off: Cell<bool>,
     }
 
     #[glib::object_subclass]
@@ -167,6 +169,23 @@ impl Backdrop {
         self.queue_draw();
     }
 
+    /// Turns the album cover background on or off.
+    pub fn set_covers(&self, on: bool) {
+        let imp = self.imp();
+        imp.covers_off.set(!on);
+        if on {
+            let url = imp.url.take();
+            self.set_cover(url.as_deref());
+        } else {
+            imp.current.take();
+            imp.previous.take();
+            if let Some(fade) = imp.fade.take() {
+                fade.skip();
+            }
+        }
+        self.queue_draw();
+    }
+
     pub fn set_cover(&self, url: Option<&str>) {
         let imp = self.imp();
         if imp.url.borrow().as_deref() == url {
@@ -174,6 +193,9 @@ impl Backdrop {
         }
         imp.url.replace(url.map(str::to_owned));
         let Some(url) = url else { return };
+        if imp.covers_off.get() {
+            return;
+        }
 
         if let Some(texture) = images::cached(url, BACKDROP) {
             self.show(&texture, images::accent(url));

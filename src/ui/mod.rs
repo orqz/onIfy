@@ -176,7 +176,7 @@ pub fn activate(app: &adw::Application) {
         .title("onIfy")
         .default_width(1280)
         .default_height(820)
-        .width_request(360)
+        .width_request(300)
         .height_request(480)
         .build();
 
@@ -209,6 +209,9 @@ pub fn activate(app: &adw::Application) {
     // and the player floats on glass above both.
     let backdrop = Backdrop::new();
     backdrop.set_mood(backdrop::Mood::from_name(&settings.background));
+    backdrop.set_covers(settings.cover_background);
+    set_animations(settings.animations);
+    images::set_low_memory(settings.low_memory);
     let host = GlassHost::new(&backdrop, &root, &bar.widget);
     host.set_lane(&content);
     host.add_panel(&sidebar_glass);
@@ -221,7 +224,16 @@ pub fn activate(app: &adw::Application) {
     toasts.set_child(Some(&host));
     window.set_content(Some(&toasts));
 
+    // Window size tiers: pages scale their headers, gutters and rows (see
+    // pages::Tier). Only the last matching breakpoint applies, so each one
+    // carries everything its size needs.
+    let medium = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 1100sp or max-height: 720sp").unwrap());
+    medium.connect_apply(|bp| set_tier(bp, pages::Tier::Medium));
+    medium.connect_unapply(|bp| set_tier(bp, pages::Tier::Large));
+    window.add_breakpoint(medium);
     let narrow = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 760sp").unwrap());
+    narrow.connect_apply(|bp| set_tier(bp, pages::Tier::Medium));
+    narrow.connect_unapply(|bp| set_tier(bp, pages::Tier::Large));
     narrow.add_setter(&split, "collapsed", Some(&true.to_value()));
     // Collapsed, the sidebar fills the window, so it makes room for the player.
     narrow.add_setter(&sidebar_glass, "margin-bottom", Some(&(PLAYER_SPACE - 12).to_value()));
@@ -241,8 +253,8 @@ pub fn activate(app: &adw::Application) {
     for widget in &bar.extras {
         compact.add_setter(widget, "visible", Some(&false.to_value()));
     }
-    compact.connect_apply(|_| pages::set_compact(true));
-    compact.connect_unapply(|_| pages::set_compact(false));
+    compact.connect_apply(|bp| set_tier(bp, pages::Tier::Compact));
+    compact.connect_unapply(|bp| set_tier(bp, pages::Tier::Large));
     window.add_breakpoint(compact);
 
     let ctx = Rc::new(Ctx {
@@ -285,6 +297,7 @@ pub fn activate(app: &adw::Application) {
     CTX.with(|c| {
         let _ = c.set(ctx.clone());
     });
+    tier_classes(&ctx.window, pages::tier());
 
     ctx.bar.set_volume(ctx.settings.borrow().volume);
     // The lyrics button lights up while lyrics are showing.
@@ -292,6 +305,7 @@ pub fn activate(app: &adw::Application) {
         let open = nav.visible_page().and_then(|p| p.tag()).as_deref() == Some(lyrics::TAG);
         self::ctx().bar.set_lyrics_open(open);
     });
+    ctx.nav.connect_popped(|_, _| drop_hidden_pages());
     install_actions(app);
     install_keys(&window);
     if let Some(row) = ctx.sidebar.row_at_index(0) {
@@ -533,6 +547,49 @@ fn fill_sidebar(playlists: &[Card]) {
     }
 }
 
+/// Pages follow the window's size tier; style.css keys spacing off the
+/// window's `tier-medium` / `tier-compact` classes.
+fn set_tier(_: &adw::Breakpoint, tier: pages::Tier) {
+    pages::set_tier(tier);
+    if let Some(ctx) = CTX.with(|c| c.get().cloned()) {
+        tier_classes(&ctx.window, tier);
+    }
+}
+
+fn tier_classes(window: &adw::ApplicationWindow, tier: pages::Tier) {
+    window.remove_css_class("tier-medium");
+    window.remove_css_class("tier-compact");
+    match tier {
+        pages::Tier::Medium => window.add_css_class("tier-medium"),
+        pages::Tier::Compact => window.add_css_class("tier-compact"),
+        pages::Tier::Large => {}
+    }
+}
+
+/// Off means onIfy's own animations and transitions are skipped; on follows
+/// the system setting.
+pub fn set_animations(on: bool) {
+    if let Some(settings) = gtk::Settings::default() {
+        if on {
+            settings.reset_property("gtk-enable-animations");
+        } else {
+            settings.set_gtk_enable_animations(false);
+        }
+    }
+}
+
+/// Low memory mode: forget loaded pages that aren't on screen or in the back
+/// history. They reopen from the disk cache, so it costs no waiting.
+pub fn drop_hidden_pages() {
+    let ctx = ctx();
+    if !ctx.settings.borrow().low_memory {
+        return;
+    }
+    let nav = ctx.nav.clone();
+    ctx.stores.borrow_mut().retain(|key, _| stack_has(&nav, key));
+    crate::memory::trim_soon();
+}
+
 fn navigate(route: Route, root: bool) {
     let ctx = ctx();
     let tag = route.tag();
@@ -569,6 +626,7 @@ fn navigate(route: Route, root: bool) {
     if matches!(route, Route::Search) {
         ctx.search.entry.grab_focus();
     }
+    drop_hidden_pages();
 }
 
 fn stack_has(nav: &adw::NavigationView, tag: &str) -> bool {
@@ -1016,7 +1074,10 @@ fn install_actions(app: &adw::Application) {
             let snapshot = gtk::Snapshot::new();
             snapshot.scale(2.0, 2.0);
             gtk::WidgetPaintable::new(Some(&window)).snapshot(&snapshot, w as f64, h as f64);
-            let (Some(node), Some(renderer)) = (snapshot.to_node(), window.renderer()) else { return };
+            let (Some(node), Some(renderer)) = (snapshot.to_node(), window.renderer()) else {
+                log::warn!("dev-render: nothing to render ({w}x{h})");
+                return;
+            };
             let viewport = gtk::graphene::Rect::new(0.0, 0.0, w * 2.0, h * 2.0);
             if let Err(e) = renderer.render_texture(&node, Some(&viewport)).save_to_png(path) {
                 log::warn!("dev-render failed: {e}");

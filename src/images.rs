@@ -22,6 +22,24 @@ use crate::rt;
 
 /// Decoded covers kept for instant reuse, by pixel bytes.
 const CACHE_BYTES: usize = 64 << 20;
+/// Low memory mode keeps this much instead.
+const CACHE_BYTES_LOW: usize = 16 << 20;
+static CACHE_LIMIT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(CACHE_BYTES);
+
+/// Low memory mode: keep fewer decoded covers around.
+pub fn set_low_memory(low: bool) {
+    let limit = if low { CACHE_BYTES_LOW } else { CACHE_BYTES };
+    CACHE_LIMIT.store(limit, std::sync::atomic::Ordering::Relaxed);
+    LOADER.with_borrow_mut(|l| {
+        while l.bytes > limit {
+            let Some(oldest) = l.textures.iter().min_by_key(|e| e.1.1).map(|e| e.0.clone()) else { break };
+            if let Some((t, _)) = l.textures.remove(&oldest) {
+                l.bytes -= t.width() as usize * t.height() as usize * 4;
+            }
+        }
+    });
+    crate::memory::trim_soon();
+}
 const MAX_IN_FLIGHT: usize = 6;
 const DISK_MAX_AGE: Duration = Duration::from_secs(60 * 60 * 24 * 30);
 /// Pass as `px` to get a heavily blurred backdrop version of the image.
@@ -175,7 +193,7 @@ fn finish(key: Key, decoded: Option<Decoded>) {
             let clock = l.clock;
             let size = |t: &gdk::Texture| t.width() as usize * t.height() as usize * 4;
             l.bytes += size(&texture);
-            while l.bytes > CACHE_BYTES {
+            while l.bytes > CACHE_LIMIT.load(std::sync::atomic::Ordering::Relaxed) {
                 let Some(oldest) = l.textures.iter().min_by_key(|e| e.1.1).map(|e| e.0.clone()) else { break };
                 if let Some((t, _)) = l.textures.remove(&oldest) {
                     l.bytes -= size(&t);

@@ -209,9 +209,71 @@ list.navigation-sidebar > row:selected {
 
 /* ---------- Hero headers ---------- */
 
+/* ---------- Gutters and size tiers ----------
+   Everything on a page lines up on one gutter. `.gutter-inset` is for lists
+   whose rows carry 12px of their own padding. Windows under ~1100x720 get
+   the medium tier, phone widths the compact one (breakpoints in ui/mod.rs). */
+
+.gutter {
+  margin-left: 36px;
+  margin-right: 36px;
+}
+
+.gutter-inset {
+  margin-left: 24px;
+  margin-right: 24px;
+}
+
+window.tier-medium .gutter {
+  margin-left: 28px;
+  margin-right: 28px;
+}
+
+window.tier-medium .gutter-inset {
+  margin-left: 16px;
+  margin-right: 16px;
+}
+
+window.tier-compact .gutter {
+  margin-left: 20px;
+  margin-right: 20px;
+}
+
+window.tier-compact .gutter-inset {
+  margin-left: 8px;
+  margin-right: 8px;
+}
+
+.hero.medium .title-hero {
+  font-size: 36px;
+  letter-spacing: -0.9px;
+}
+
+.hero.medium .eyebrow {
+  font-size: 10px;
+}
+
 .hero.compact .title-hero {
-  font-size: 32px;
-  letter-spacing: -0.8px;
+  font-size: 30px;
+  letter-spacing: -0.6px;
+}
+
+.hero-art.round {
+  border-radius: 999px;
+}
+
+.hero.medium button.hero-play,
+.hero.compact button.hero-play {
+  min-width: 48px;
+  min-height: 48px;
+  -gtk-icon-size: 20px;
+}
+
+.hero.medium button.glass-button,
+.hero.compact button.glass-button {
+  min-width: 40px;
+  min-height: 40px;
+  -gtk-icon-size: 18px;
 }
 
 .hero-art {
@@ -302,9 +364,29 @@ list.tracks > row {
 .track-row {
   margin: 0 24px;
   padding: 0 12px;
-  min-height: 60px;
+  min-height: 58px;
   border-radius: 14px;
   transition: background-color 120ms ease-out;
+}
+
+window.tier-medium .track-columns,
+window.tier-medium .track-row {
+  margin-left: 16px;
+  margin-right: 16px;
+}
+
+window.tier-medium .track-row {
+  min-height: 54px;
+}
+
+window.tier-compact .track-columns,
+window.tier-compact .track-row {
+  margin-left: 8px;
+  margin-right: 8px;
+}
+
+window.tier-compact .track-row {
+  min-height: 52px;
 }
 
 list.tracks .track-row {
@@ -426,6 +508,7 @@ button.card-tile {
 
 button.card-tile:hover {
   background-color: rgba(255, 255, 255, 0.07);
+  transform: scale(1.03);
 }
 
 button.card-tile:active {
@@ -461,6 +544,7 @@ button.shortcut {
 
 button.shortcut:hover {
   background-color: rgba(255, 255, 255, 0.15);
+  transform: scale(1.015);
 }
 
 .shortcut-title {
@@ -557,6 +641,16 @@ button.play-button {
 
 button.play-button:hover {
   transform: scale(1.07);
+}
+
+@keyframes pop {
+  0% { transform: scale(1); }
+  45% { transform: scale(1.16); }
+  100% { transform: scale(1); }
+}
+
+button.play-button.pop {
+  animation: pop 300ms ease-out;
 }
 
 button.play-button:active {

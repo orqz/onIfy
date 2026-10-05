@@ -28,10 +28,11 @@ pub enum RowMode {
 }
 
 pub struct Parts {
+    /// Number, playing indicator or ▶, crossfading between them.
+    lead: gtk::Stack,
+    /// Play counts are for album and artist pages, not playlists.
+    show_plays: bool,
     number: gtk::Label,
-    playing: gtk::Image,
-    /// Takes the number's place while the pointer is on the row.
-    play: gtk::Button,
     cover: Option<Cover>,
     title: gtk::Label,
     explicit: gtk::Label,
@@ -82,6 +83,9 @@ glib::wrapper! {
 const PRELOAD_AFTER: std::time::Duration = std::time::Duration::from_millis(300);
 
 thread_local! {
+    /// Album column labels and headings, hidden when the window is compact.
+    static ALBUM_COLUMNS: RefCell<Vec<glib::WeakRef<gtk::Widget>>> = const { RefCell::new(Vec::new()) };
+    static ALBUM_SHOWN: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
     static ROWS: RefCell<Vec<glib::WeakRef<TrackRow>>> = const { RefCell::new(Vec::new()) };
     static HOVER: RefCell<Option<glib::SourceId>> = const { RefCell::new(None) };
     static PRELOADED: RefCell<String> = const { RefCell::new(String::new()) };
@@ -128,14 +132,18 @@ impl TrackRow {
             .build();
         row.add_css_class("track-row");
 
-        let lead = gtk::Box::builder().width_request(LEAD_WIDTH).hexpand(false).build();
+        let lead = gtk::Stack::builder()
+            .width_request(LEAD_WIDTH)
+            .hexpand(false)
+            .transition_type(gtk::StackTransitionType::Crossfade)
+            .transition_duration(140)
+            .build();
         let number = gtk::Label::builder().xalign(1.0).hexpand(true).build();
         number.add_css_class("numeric");
         dim(&number);
         let playing = gtk::Image::from_icon_name("onify-playing-symbolic");
         playing.set_hexpand(true);
         playing.set_halign(gtk::Align::End);
-        playing.set_visible(false);
         playing.add_css_class("accent");
         // Rows don't play on a click (that only selects); this button does.
         let play = gtk::Button::from_icon_name("onify-media-playback-start-symbolic");
@@ -146,10 +154,9 @@ impl TrackRow {
         play.set_hexpand(true);
         play.set_halign(gtk::Align::End);
         play.set_valign(gtk::Align::Center);
-        play.set_visible(false);
-        lead.append(&number);
-        lead.append(&playing);
-        lead.append(&play);
+        lead.add_named(&number, Some("number"));
+        lead.add_named(&playing, Some("playing"));
+        lead.add_named(&play, Some("play"));
         row.append(&lead);
 
         let cover = (mode != RowMode::Album).then(|| {
@@ -179,7 +186,11 @@ impl TrackRow {
 
         let album = ellipsized("track-album");
         dim(&album);
-        album.set_visible(mode == RowMode::Playlist);
+        if mode == RowMode::Playlist {
+            album_column(&album);
+        } else {
+            album.set_visible(false);
+        }
         columns.append(&album);
         row.append(&columns);
 
@@ -201,9 +212,9 @@ impl TrackRow {
             move |_| row.play()
         ));
         let _ = row.imp().parts.set(Parts {
+            lead,
+            show_plays: mode != RowMode::Playlist,
             number,
-            playing,
-            play,
             cover,
             title,
             explicit,
@@ -228,7 +239,8 @@ impl TrackRow {
                     let Some(track) = weak.upgrade().and_then(|r| r.track()) else { return };
                     let playing = NOW_PLAYING.with_borrow(|now| *now == track.uri);
                     let fresh = PRELOADED.with_borrow(|last| *last != track.uri);
-                    if track.playable && !playing && fresh {
+                    let wanted = super::ctx().settings.borrow().hover_preload;
+                    if track.playable && !playing && fresh && wanted {
                         PRELOADED.with_borrow_mut(|last| *last = track.uri.clone());
                         super::ctx().with_engine(|e| e.preload(&track.uri));
                     }
@@ -278,7 +290,7 @@ impl TrackRow {
             parts.artists.set_label(&track.artist_names());
             parts.album.set_label(&track.album.name);
             parts.duration.set_label(&format_duration(track.duration_ms));
-            parts.plays.set_visible(track.plays > 0);
+            parts.plays.set_visible(parts.show_plays && track.plays > 0);
             parts.plays.set_label(&group_digits(track.plays));
             if let Some(cover) = &parts.cover {
                 cover.set_url(track.images.pick(64));
@@ -312,9 +324,11 @@ impl TrackRow {
             NOW_PLAYING.with_borrow(|now| !now.is_empty() && item.borrow::<Track>().uri == *now)
         });
         let hovered = self.imp().hovered.get();
-        parts.number.set_visible(!playing && !hovered);
-        parts.playing.set_visible(playing && !hovered);
-        parts.play.set_visible(hovered);
+        parts.lead.set_visible_child_name(match (hovered, playing) {
+            (true, _) => "play",
+            (false, true) => "playing",
+            (false, false) => "number",
+        });
         if playing {
             self.add_css_class("playing");
         } else {
@@ -371,6 +385,22 @@ pub fn group_digits(n: u64) -> String {
     out
 }
 
+fn album_column(widget: &impl IsA<gtk::Widget>) {
+    widget.set_visible(ALBUM_SHOWN.get());
+    ALBUM_COLUMNS.with_borrow_mut(|c| c.push(widget.upcast_ref::<gtk::Widget>().downgrade()));
+}
+
+/// Shows or hides the album column in every playlist.
+pub fn set_album_column(shown: bool) {
+    ALBUM_SHOWN.set(shown);
+    ALBUM_COLUMNS.with_borrow_mut(|columns| {
+        columns.retain(|c| c.upgrade().is_some());
+        for column in columns.iter().filter_map(|c| c.upgrade()) {
+            column.set_visible(shown);
+        }
+    });
+}
+
 pub fn format_duration(ms: u32) -> String {
     let s = ms / 1000;
     if s >= 3600 {
@@ -392,14 +422,18 @@ pub fn column_header(mode: RowMode) -> gtk::Box {
     let lead = caption("#", 1.0);
     lead.set_width_request(LEAD_WIDTH);
     header.append(&lead);
+    // Same pieces as a row, so the columns line up: a cover-sized spacer,
+    // then the evenly split title and album columns.
+    if mode != RowMode::Album {
+        header.append(&gtk::Box::builder().width_request(COVER).build());
+    }
     let columns = gtk::Box::builder().homogeneous(true).spacing(24).hexpand(true).build();
     let title = caption("Title", 0.0);
-    if mode != RowMode::Album {
-        title.set_margin_start(COVER + 16);
-    }
     columns.append(&title);
     if mode == RowMode::Playlist {
-        columns.append(&caption("Album", 0.0));
+        let heading = caption("Album", 0.0);
+        album_column(&heading);
+        columns.append(&heading);
     }
     header.append(&columns);
     let time = caption("Time", 1.0);

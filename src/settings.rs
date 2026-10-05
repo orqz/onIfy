@@ -14,6 +14,11 @@ pub struct Settings {
     pub discord_enabled: bool,
     /// How dim the blurred cover is: "bright", "normal" or "dark".
     pub background: String,
+    /// Performance switches.
+    pub animations: bool,
+    pub cover_background: bool,
+    pub hover_preload: bool,
+    pub low_memory: bool,
     pub discord_client_id: String,
     pub lastfm: lastfm::Account,
 }
@@ -41,6 +46,10 @@ impl Settings {
             },
             discord_enabled: v["discord_enabled"].as_bool().unwrap_or(true),
             background: text("background"),
+            animations: v["animations"].as_bool().unwrap_or(true),
+            cover_background: v["cover_background"].as_bool().unwrap_or(true),
+            hover_preload: v["hover_preload"].as_bool().unwrap_or(true),
+            low_memory: v["low_memory"].as_bool().unwrap_or(false),
             discord_client_id: text("discord_client_id"),
             lastfm: lastfm::Account {
                 api_key: text("lastfm_api_key"),
@@ -62,6 +71,10 @@ impl Settings {
             "local_folders": self.local_folders,
             "discord_enabled": self.discord_enabled,
             "background": self.background,
+            "animations": self.animations,
+            "cover_background": self.cover_background,
+            "hover_preload": self.hover_preload,
+            "low_memory": self.low_memory,
             "discord_client_id": self.discord_client_id,
             "lastfm_api_key": self.lastfm.api_key,
             "lastfm_secret": self.lastfm.secret,
@@ -70,6 +83,11 @@ impl Settings {
         });
         let _ = std::fs::create_dir_all(crate::spotify::config_dir());
         let _ = std::fs::write(path(), v.to_string());
+    }
+
+    /// Animations, cover background, hover preload, low memory.
+    pub fn clone_switches(&self) -> (bool, bool, bool, bool) {
+        (self.animations, self.cover_background, self.hover_preload, self.low_memory)
     }
 
     /// The Discord application to show presence as, if presence is on.

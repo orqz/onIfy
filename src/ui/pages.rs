@@ -13,8 +13,9 @@ use super::{ctx, open_card};
 use crate::api::{Api, Card, Chunk, Header, Home, Images, Kind, SearchResults, Track, id_of};
 use crate::rt;
 
-/// Horizontal page margin; everything lines up on it.
-const GUTTER: i32 = 36;
+// Pages line up on one gutter, set in style.css (`.gutter`, `.gutter-inset`
+// for lists whose rows carry their own 12px padding) and narrowing with the
+// window's tier.
 
 fn label(text: &str, classes: &[&str]) -> gtk::Label {
     let label = gtk::Label::builder()
@@ -37,7 +38,18 @@ pub fn page(title: &str, tag: &str, content: &impl IsA<gtk::Widget>, header: &ad
     toolbar.add_top_bar(header);
     toolbar.set_content(Some(content));
     toolbar.set_extend_content_to_top_edge(false);
-    adw::NavigationPage::with_tag(&toolbar, title, tag)
+    let page = adw::NavigationPage::with_tag(&toolbar, title, tag);
+    // Content fades in as the page slides in.
+    let content = content.clone().upcast::<gtk::Widget>();
+    let fade_slot: Rc<RefCell<Option<adw::TimedAnimation>>> = Rc::default();
+    page.connect_showing(move |_| {
+        let target = adw::PropertyAnimationTarget::new(&content, "opacity");
+        let fade = adw::TimedAnimation::new(&content, 0.0, 1.0, 260, target);
+        fade.set_easing(adw::Easing::EaseOutCubic);
+        fade.play();
+        fade_slot.replace(Some(fade));
+    });
+    page
 }
 
 fn scrolled(child: &impl IsA<gtk::Widget>) -> gtk::ScrolledWindow {
@@ -103,50 +115,90 @@ struct Hero {
     actions: gtk::Box,
 }
 
-thread_local! {
-    /// Every page header, so a narrow window can stack them all.
-    static HEROES: RefCell<Vec<glib::WeakRef<gtk::Box>>> = const { RefCell::new(Vec::new()) };
-    static COMPACT: Cell<bool> = const { Cell::new(false) };
+/// How much room the pages get, from the window's size (breakpoints in
+/// ui/mod.rs). Page headers, gutters and rows scale with it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Tier {
+    #[default]
+    Large,
+    /// Under ~1100px wide or ~720px tall: smaller headers.
+    Medium,
+    /// Phone width: headers stack the cover above the title.
+    Compact,
 }
 
-fn apply_compact(hero: &gtk::Box, compact: bool) {
-    // Cover above the title when there's no room for them side by side.
-    hero.set_orientation(if compact { gtk::Orientation::Vertical } else { gtk::Orientation::Horizontal });
-    hero.set_spacing(if compact { 20 } else { 32 });
-    if compact {
-        hero.add_css_class("compact");
-    } else {
-        hero.remove_css_class("compact");
+impl Tier {
+    fn art(self) -> i32 {
+        match self {
+            Tier::Large => 232,
+            Tier::Medium => 168,
+            Tier::Compact => 148,
+        }
     }
 }
 
-/// Called as the window crosses the compact width.
-pub fn set_compact(compact: bool) {
-    COMPACT.set(compact);
+thread_local! {
+    /// Every page header (and its art), so they all follow the tier.
+    static HEROES: RefCell<Vec<(glib::WeakRef<gtk::Box>, glib::WeakRef<gtk::Box>)>> = const { RefCell::new(Vec::new()) };
+    static TIER: Cell<Tier> = const { Cell::new(Tier::Large) };
+}
+
+fn apply_tier(hero: &gtk::Box, art: &gtk::Box, tier: Tier) {
+    let compact = tier == Tier::Compact;
+    // Cover above the title when there's no room for them side by side.
+    hero.set_orientation(if compact { gtk::Orientation::Vertical } else { gtk::Orientation::Horizontal });
+    hero.set_spacing(match tier {
+        Tier::Large => 36,
+        Tier::Medium => 24,
+        Tier::Compact => 18,
+    });
+    hero.set_margin_bottom(if tier == Tier::Large { 32 } else { 20 });
+    for class in ["medium", "compact"] {
+        hero.remove_css_class(class);
+    }
+    match tier {
+        Tier::Medium => hero.add_css_class("medium"),
+        Tier::Compact => hero.add_css_class("compact"),
+        Tier::Large => {}
+    }
+    // The cover, or the gradient tile standing in for one.
+    if let Some(child) = art.first_child() {
+        let px = tier.art();
+        match child.downcast::<Cover>() {
+            Ok(cover) => cover.set_size(px),
+            Err(tile) => tile.set_size_request(px, px),
+        }
+    }
+}
+
+pub fn tier() -> Tier {
+    TIER.get()
+}
+
+/// Called as the window's size crosses a tier.
+pub fn set_tier(tier: Tier) {
+    TIER.set(tier);
     HEROES.with_borrow_mut(|heroes| {
-        heroes.retain(|h| h.upgrade().is_some());
-        for hero in heroes.iter().filter_map(|h| h.upgrade()) {
-            apply_compact(&hero, compact);
+        heroes.retain(|(h, _)| h.upgrade().is_some());
+        for (hero, art) in heroes.iter().filter_map(|(h, a)| Some((h.upgrade()?, a.upgrade()?))) {
+            apply_tier(&hero, &art, tier);
         }
     });
+    super::track_row::set_album_column(tier != Tier::Compact);
 }
 
 fn hero(eyebrow: &str, title: &str, art: &impl IsA<gtk::Widget>) -> Hero {
-    let widget = gtk::Box::builder()
-        .spacing(32)
-        .margin_top(12)
-        .margin_bottom(28)
-        .margin_start(GUTTER)
-        .margin_end(GUTTER)
-        .build();
+    let widget = gtk::Box::builder().spacing(32).margin_top(8).build();
     widget.add_css_class("hero");
-    apply_compact(&widget, COMPACT.get());
-    HEROES.with_borrow_mut(|heroes| heroes.push(widget.downgrade()));
+    widget.add_css_class("gutter");
     let art_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     art_box.add_css_class("hero-art");
     art_box.set_valign(gtk::Align::Center);
+    art_box.set_halign(gtk::Align::Start);
     art_box.append(art);
     widget.append(&art_box);
+    apply_tier(&widget, &art_box, TIER.get());
+    HEROES.with_borrow_mut(|heroes| heroes.push((widget.downgrade(), art_box.downgrade())));
 
     let info = gtk::Box::builder()
         .orientation(gtk::Orientation::Vertical)
@@ -222,14 +274,10 @@ fn carousel(title: &str, cards: &[Card]) -> Option<gtk::Box> {
     }
     let section = vbox(12);
     let heading = label(title, &["title-section"]);
-    heading.set_margin_start(GUTTER);
-    heading.set_margin_end(GUTTER);
+    heading.add_css_class("gutter");
     section.append(&heading);
-    let row = gtk::Box::builder()
-        .spacing(4)
-        .margin_start(GUTTER - 12)
-        .margin_end(GUTTER - 12)
-        .build();
+    let row = gtk::Box::builder().spacing(4).build();
+    row.add_css_class("gutter-inset");
     for c in cards {
         row.append(&card(c));
     }
@@ -253,8 +301,7 @@ fn shortcuts(cards: &[Card]) -> gtk::FlowBox {
         .max_children_per_line(4)
         .column_spacing(12)
         .row_spacing(12)
-        .margin_start(GUTTER)
-        .margin_end(GUTTER)
+        .css_classes(["gutter"])
         .build();
     for c in cards {
         let button = gtk::Button::new();
@@ -300,7 +347,7 @@ impl HomePage {
         body.set_margin_top(8);
         body.set_margin_bottom(40);
         let title = label(greeting(), &["title-hero"]);
-        title.set_margin_start(GUTTER);
+        title.add_css_class("gutter");
         body.append(&title);
         body.append(&spinner());
         let scroller = scrolled(&body);
@@ -450,11 +497,7 @@ fn show_results(stack: &gtk::Stack, results: &gtk::Box, found: &SearchResults) {
         return;
     }
 
-    let top = gtk::Box::builder()
-        .spacing(28)
-        .margin_start(GUTTER)
-        .margin_end(GUTTER)
-        .build();
+    let top = gtk::Box::builder().spacing(28).css_classes(["gutter"]).build();
     let best = found.artists.first().or(found.albums.first()).or(found.playlists.first());
     if let Some(best) = best {
         let column = vbox(12);
@@ -768,12 +811,13 @@ pub fn tracks_page(kind: Kind, uri: &str, title: &str, images: &Images) -> adw::
 }
 
 pub fn artist_page(card: &Card) -> adw::NavigationPage {
-    let body = vbox(40);
+    let body = vbox(28);
     body.set_margin_bottom(40);
 
-    let avatar = Cover::round(212);
+    let avatar = Cover::round(232);
     avatar.set_url(card.images.pick(480));
     let hero = hero("Artist", &card.name, &avatar);
+    hero.art.add_css_class("round");
     let play = play_button("Play");
     let uri = card.uri.clone();
     play.connect_clicked(move |_| ctx().with_engine(|e| e.play_context(&uri, None, None)));
@@ -809,7 +853,7 @@ pub fn artist_page(card: &Card) -> adw::NavigationPage {
             if !artist.top.is_empty() {
                 let popular = vbox(12);
                 let heading = label("Popular", &["title-section"]);
-                heading.set_margin_start(GUTTER);
+                heading.add_css_class("gutter");
                 popular.append(&heading);
                 let top: Vec<Track> = artist.top.iter().take(10).cloned().collect();
                 let uris = top.clone();
@@ -817,8 +861,7 @@ pub fn artist_page(card: &Card) -> adw::NavigationPage {
                     let uri = uris[i].uri.clone();
                     ctx().with_engine(|e| e.play_context(&artist_uri, Some(&uri), None));
                 });
-                list.set_margin_start(GUTTER - 12);
-                list.set_margin_end(GUTTER - 12);
+                list.add_css_class("gutter-inset");
                 popular.append(&list);
                 body.append(&popular);
             }

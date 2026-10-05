@@ -83,6 +83,19 @@ impl Cover {
         Self::new(size, size as f32 / 2.0)
     }
 
+    /// Resizes, keeping a round cover round.
+    pub fn set_size(&self, size: i32) {
+        let imp = self.imp();
+        if imp.size.get() == size {
+            return;
+        }
+        if imp.radius.get() * 2.0 >= imp.size.get() as f32 {
+            imp.radius.set(size as f32 / 2.0);
+        }
+        imp.size.set(size);
+        self.queue_resize();
+    }
+
     pub fn set_url(&self, url: Option<&str>) {
         let imp = self.imp();
         if imp.url.borrow().as_deref() == url {

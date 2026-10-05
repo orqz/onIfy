@@ -11,6 +11,7 @@ use crate::{lastfm, rt};
 pub fn present(window: &adw::ApplicationWindow) {
     let page = adw::PreferencesPage::new();
     page.add(&look_group());
+    page.add(&performance_group());
     page.add(&local_group());
     page.add(&discord_group());
     page.add(&lastfm_group());
@@ -57,6 +58,40 @@ fn look_group() -> adw::PreferencesGroup {
         ctx().backdrop.set_mood(mood);
     });
     group.add(&background);
+    group
+}
+
+fn switch(title: &str, subtitle: &str, active: bool, changed: impl Fn(bool) + 'static) -> adw::SwitchRow {
+    let row = adw::SwitchRow::builder().title(title).subtitle(subtitle).active(active).build();
+    row.connect_active_notify(move |row| {
+        changed(row.is_active());
+        save();
+    });
+    row
+}
+
+fn performance_group() -> adw::PreferencesGroup {
+    let group = adw::PreferencesGroup::builder()
+        .title("Performance")
+        .description("onIfy is light already; these make it lighter still.")
+        .build();
+    let settings = ctx().settings.borrow().clone_switches();
+    group.add(&switch("Animations", "Fades, slides and button effects", settings.0, |on| {
+        ctx().settings.borrow_mut().animations = on;
+        super::set_animations(on);
+    }));
+    group.add(&switch("Album Cover Background", "The blurred cover behind everything", settings.1, |on| {
+        ctx().settings.borrow_mut().cover_background = on;
+        ctx().backdrop.set_covers(on);
+    }));
+    group.add(&switch("Preload Songs on Hover", "Songs start instantly; uses a little bandwidth", settings.2, |on| {
+        ctx().settings.borrow_mut().hover_preload = on;
+    }));
+    group.add(&switch("Low Memory Mode", "Keeps fewer covers and pages in memory", settings.3, |on| {
+        ctx().settings.borrow_mut().low_memory = on;
+        crate::images::set_low_memory(on);
+        super::drop_hidden_pages();
+    }));
     group
 }
 
