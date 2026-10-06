@@ -14,6 +14,8 @@ pub struct Settings {
     pub discord_enabled: bool,
     /// How dim the blurred cover is: "bright", "normal" or "dark".
     pub background: String,
+    /// The look: "vinyl" (no glass, a turning record) or "glass".
+    pub style: String,
     /// Performance switches.
     pub animations: bool,
     pub cover_background: bool,
@@ -46,6 +48,7 @@ impl Settings {
             },
             discord_enabled: v["discord_enabled"].as_bool().unwrap_or(true),
             background: text("background"),
+            style: v["style"].as_str().unwrap_or("vinyl").to_owned(),
             animations: v["animations"].as_bool().unwrap_or(true),
             cover_background: v["cover_background"].as_bool().unwrap_or(true),
             hover_preload: v["hover_preload"].as_bool().unwrap_or(true),
@@ -71,6 +74,7 @@ impl Settings {
             "local_folders": self.local_folders,
             "discord_enabled": self.discord_enabled,
             "background": self.background,
+            "style": self.style,
             "animations": self.animations,
             "cover_background": self.cover_background,
             "hover_preload": self.hover_preload,

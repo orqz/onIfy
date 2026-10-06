@@ -8,6 +8,9 @@
 //! The host holds the backdrop, the page content and one floating panel (the
 //! player), which it stretches across a "lane" (the playlist column). Panels
 //! inside the content, like the sidebar, are registered with `add_panel`.
+//!
+//! The Vinyl style turns the material off: panels then sit straight on the
+//! backdrop, with only a soft shade behind them to keep text readable.
 
 use std::cell::{Cell, OnceCell, RefCell};
 
@@ -50,6 +53,7 @@ mod imp {
         pub floating: OnceCell<super::Glass>,
         pub lane: glib::WeakRef<gtk::Widget>,
         pub panels: RefCell<Vec<glib::WeakRef<super::Glass>>>,
+        pub shade_only: Cell<bool>,
     }
 
     #[glib::object_subclass]
@@ -117,13 +121,19 @@ mod imp {
                 snapshot.append_node(node);
             }
 
+            let shade_only = self.shade_only.get();
+            let window = graphene::Rect::new(0.0, 0.0, obj.width() as f32, obj.height() as f32);
             self.panels.borrow_mut().retain(|p| p.upgrade().is_some());
             for panel in self.panels.borrow().iter().filter_map(|p| p.upgrade()) {
                 if !panel.is_drawable() {
                     continue;
                 }
                 if let Some(bounds) = panel.compute_bounds(&*obj) {
-                    draw_material(snapshot, &bounds, panel.radius(), backdrop.as_ref());
+                    if shade_only {
+                        draw_side_shade(snapshot, &bounds, &window);
+                    } else {
+                        draw_material(snapshot, &bounds, panel.radius(), backdrop.as_ref());
+                    }
                 }
             }
 
@@ -133,7 +143,11 @@ mod imp {
 
             if let Some(floating) = self.floating.get().filter(|f| f.is_drawable()) {
                 if let Some(bounds) = floating.compute_bounds(&*obj) {
-                    draw_material(snapshot, &bounds, floating.radius(), backdrop.as_ref());
+                    if shade_only {
+                        draw_bottom_shade(snapshot, &bounds, &window);
+                    } else {
+                        draw_material(snapshot, &bounds, floating.radius(), backdrop.as_ref());
+                    }
                 }
                 obj.snapshot_child(floating, snapshot);
             }
@@ -193,6 +207,42 @@ impl GlassHost {
         self.imp().panels.borrow_mut().push(panel.downgrade());
         self.queue_draw();
     }
+
+    /// No glass, only shade behind the panels (the Vinyl style).
+    pub fn set_shade_only(&self, on: bool) {
+        self.imp().shade_only.set(on);
+        self.queue_draw();
+    }
+}
+
+/// Darkens from the window's left edge to just past the sidebar, so its text
+/// reads on any cover without a panel around it.
+fn draw_side_shade(snapshot: &gtk::Snapshot, panel: &graphene::Rect, window: &graphene::Rect) {
+    let reach = panel.x() + panel.width() + 64.0;
+    let area = graphene::Rect::new(0.0, 0.0, reach, window.height());
+    let stop = |at: f32, alpha: f32| gsk::ColorStop::new(at / reach, black(alpha));
+    snapshot.append_linear_gradient(
+        &area,
+        &graphene::Point::new(0.0, 0.0),
+        &graphene::Point::new(reach, 0.0),
+        &[stop(0.0, 0.42), stop(panel.x() + panel.width() * 0.6, 0.30), stop(reach, 0.0)],
+    );
+}
+
+/// Darkens upwards from the window's bottom edge behind the player.
+fn draw_bottom_shade(snapshot: &gtk::Snapshot, panel: &graphene::Rect, window: &graphene::Rect) {
+    let top = (panel.y() - 72.0).max(0.0);
+    let area = graphene::Rect::new(0.0, top, window.width(), window.height() - top);
+    snapshot.append_linear_gradient(
+        &area,
+        &graphene::Point::new(0.0, top),
+        &graphene::Point::new(0.0, window.height()),
+        &[
+            gsk::ColorStop::new(0.0, black(0.0)),
+            gsk::ColorStop::new(0.5, black(0.38)),
+            gsk::ColorStop::new(1.0, black(0.62)),
+        ],
+    );
 }
 
 fn white(alpha: f32) -> gdk::RGBA {
@@ -228,9 +278,8 @@ fn draw_material(snapshot: &gtk::Snapshot, bounds: &graphene::Rect, radius: f32,
     let radius = radius.min(w / 2.0).min(h / 2.0);
     let shape = gsk::RoundedRect::from_rect(*bounds, radius);
 
-    // Lift: a wide soft shadow and a tight contact one.
-    snapshot.append_outset_shadow(&shape, &black(0.28), 0.0, 16.0, 0.0, 44.0);
-    snapshot.append_outset_shadow(&shape, &black(0.20), 0.0, 1.0, 0.0, 3.0);
+    // Lift: one wide, soft shadow. (A tight contact shadow read as an outline.)
+    snapshot.append_outset_shadow(&shape, &black(0.22), 0.0, 14.0, 0.0, 40.0);
 
     snapshot.push_rounded_clip(&shape);
     if let Some(behind) = behind {
@@ -254,20 +303,20 @@ fn draw_material(snapshot: &gtk::Snapshot, bounds: &graphene::Rect, radius: f32,
         &graphene::Point::new(bounds.x(), bounds.y()),
         &graphene::Point::new(bounds.x(), bounds.y() + h),
         &[
-            gsk::ColorStop::new(0.0, white(0.10)),
-            gsk::ColorStop::new(0.55, white(0.03)),
-            gsk::ColorStop::new(1.0, white(0.05)),
+            gsk::ColorStop::new(0.0, white(0.07)),
+            gsk::ColorStop::new(0.5, white(0.02)),
+            gsk::ColorStop::new(1.0, white(0.03)),
         ],
     );
-    // Thickness: light caught along the inside of the top edge, a faint glow
-    // all round, and a little shade along the bottom.
-    snapshot.append_inset_shadow(&shape, &white(0.20), 0.0, 1.0, 0.0, 1.0);
-    snapshot.append_inset_shadow(&shape, &white(0.06), 0.0, 0.0, 0.0, 14.0);
-    snapshot.append_inset_shadow(&shape, &black(0.16), 0.0, -1.0, 0.0, 2.0);
+    // Thickness without an outline: a soft glow inside the edge, brighter
+    // towards the top, never a hard line.
+    snapshot.append_inset_shadow(&shape, &white(0.035), 0.0, 0.0, 0.0, 18.0);
+    snapshot.append_inset_shadow(&shape, &white(0.05), 0.0, 6.0, 0.0, 12.0);
     snapshot.pop();
 
-    // Specular rim: bright where the light hits (top left), clear along the
-    // sides, picking up again at the bottom right as it refracts through.
+    // Specular rim: light caught on the top-left corner and, faintly, the
+    // bottom-right, gone along the straight edges so it never reads as a
+    // border.
     snapshot.push_mask(gsk::MaskMode::Alpha);
     snapshot.append_border(&shape, &[1.0; 4], &[white(1.0); 4]);
     snapshot.pop();
@@ -276,10 +325,10 @@ fn draw_material(snapshot: &gtk::Snapshot, bounds: &graphene::Rect, radius: f32,
         &graphene::Point::new(bounds.x(), bounds.y()),
         &graphene::Point::new(bounds.x() + w, bounds.y() + h),
         &[
-            gsk::ColorStop::new(0.0, white(0.55)),
-            gsk::ColorStop::new(0.35, white(0.10)),
-            gsk::ColorStop::new(0.7, white(0.06)),
-            gsk::ColorStop::new(1.0, white(0.32)),
+            gsk::ColorStop::new(0.0, white(0.26)),
+            gsk::ColorStop::new(0.2, white(0.04)),
+            gsk::ColorStop::new(0.8, white(0.0)),
+            gsk::ColorStop::new(1.0, white(0.10)),
         ],
     );
     snapshot.pop();

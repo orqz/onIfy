@@ -82,6 +82,8 @@ pub struct PlayerBar {
 
 /// The cover fills the capsule's height inside its padding (see style.css).
 const COVER: i32 = 46;
+/// The same height with the Vinyl style's thinner padding.
+const RECORD: i32 = 54;
 
 fn icon_button(icon: &str, tooltip: &str) -> gtk::Button {
     let button = gtk::Button::from_icon_name(icon);
@@ -578,7 +580,17 @@ impl PlayerBar {
             "onify-media-playback-start-symbolic"
         });
         self.play.set_tooltip_text(Some(if playing { "Pause" } else { "Play" }));
+        self.cover.set_spinning(playing);
         self.schedule();
+    }
+
+    /// The Vinyl style: the cover becomes a record, a little larger since
+    /// there's no capsule padding around it (style.css), turning while
+    /// music plays.
+    pub fn set_record(&self, on: bool) {
+        self.cover.set_size(if on { RECORD } else { COVER });
+        self.cover.set_record(on);
+        self.cover.set_spinning(self.is_playing());
     }
 
     pub fn set_position(&self, position_ms: u32) {

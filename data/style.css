@@ -120,7 +120,7 @@ headerbar menubutton > button {
   margin-top: 5px;
   margin-bottom: 5px;
   background-color: rgba(255, 255, 255, 0.08);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
   transition: background-color 160ms ease-out;
 }
 
@@ -143,7 +143,7 @@ headerbar windowcontrols > button > image {
   padding: 0;
   border-radius: 999px;
   background-color: rgba(255, 255, 255, 0.08);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 headerbar windowcontrols > button:hover > image {
@@ -152,6 +152,16 @@ headerbar windowcontrols > button:hover > image {
 
 .fade-title {
   transition: opacity 200ms ease-out;
+}
+
+/* No line under the header when a page scrolls: rows slide under it. */
+toolbarview > .top-bar,
+toolbarview > .top-bar.raised,
+toolbarview.undershoot-top > .top-bar,
+scrolledwindow > undershoot.top,
+scrolledwindow > undershoot.bottom {
+  box-shadow: none;
+  background: none;
 }
 
 /* ---------- Sidebar ---------- */
@@ -185,7 +195,7 @@ list.navigation-sidebar > row:hover {
 
 list.navigation-sidebar > row:selected {
   background-color: rgba(255, 255, 255, 0.13);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.09);
 }
 
 .sidebar-heading {
@@ -301,7 +311,7 @@ button.hero-play {
   background-color: var(--accent-bg-color);
   color: var(--accent-fg-color);
   -gtk-icon-size: 24px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 10px 26px rgba(0, 0, 0, 0.4);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.23), 0 10px 26px rgba(0, 0, 0, 0.4);
   transition: transform 180ms cubic-bezier(0.2, 0.9, 0.3, 1.2), background-color 700ms ease-out;
 }
 
@@ -320,7 +330,7 @@ button.glass-button {
   -gtk-icon-size: 20px;
   color: #ffffff;
   background-color: rgba(255, 255, 255, 0.1);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.26), inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.13);
   transition: background-color 160ms ease-out, transform 180ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
 }
 
@@ -333,7 +343,7 @@ button.glass-button:hover {
 button.glass-button.active {
   color: var(--accent-color);
   background-color: color-mix(in srgb, var(--accent-color) 24%, transparent);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), inset 0 0 0 1px color-mix(in srgb, var(--accent-color) 45%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10), inset 0 0 0 1px color-mix(in srgb, var(--accent-color) 45%, transparent);
 }
 
 /* ---------- Track lists ---------- */
@@ -400,7 +410,7 @@ list.tracks .track-row {
 listview.tracks > row:selected .track-row,
 list.tracks > row:selected .track-row {
   background-color: rgba(255, 255, 255, 0.13);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .track-title {
@@ -426,8 +436,16 @@ list.tracks > row:selected .track-row {
   transition: opacity 150ms ease-out;
 }
 
+/* Playlists put the selected song's count after its artists instead. */
+.track-plays-inline {
+  opacity: 0;
+  transition: opacity 150ms ease-out;
+}
+
 listview.tracks > row:selected .track-plays,
-list.tracks > row:selected .track-plays {
+list.tracks > row:selected .track-plays,
+listview.tracks > row:selected .track-plays-inline,
+list.tracks > row:selected .track-plays-inline {
   opacity: 1;
 }
 
@@ -539,7 +557,7 @@ button.shortcut {
   padding: 8px 14px 8px 8px;
   border-radius: 14px;
   background-color: rgba(255, 255, 255, 0.08);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
   transition: background-color 160ms ease-out;
 }
 
@@ -557,7 +575,7 @@ button.top-result {
   padding: 22px;
   border-radius: 22px;
   background-color: rgba(255, 255, 255, 0.08);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.09);
   transition: background-color 160ms ease-out;
 }
 
@@ -579,7 +597,7 @@ entry.search-pill {
   padding: 0 14px;
   font-size: 15px;
   background-color: rgba(255, 255, 255, 0.11);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.10);
 }
 
 entry.search-pill:focus-within {
@@ -636,7 +654,7 @@ button.play-button {
   padding: 0;
   background-color: var(--accent-bg-color);
   color: var(--accent-fg-color);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 6px 18px rgba(0, 0, 0, 0.35);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.20), 0 6px 18px rgba(0, 0, 0, 0.35);
   transition: transform 180ms cubic-bezier(0.2, 0.9, 0.3, 1.2), background-color 700ms ease-out;
 }
 
@@ -754,16 +772,131 @@ popover.volume-pop > contents {
 
 popover > contents {
   border-radius: 16px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 18px 44px rgba(0, 0, 0, 0.5);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 18px 44px rgba(0, 0, 0, 0.5);
 }
 
 toast {
   border-radius: 999px;
   background-color: rgba(30, 30, 38, 0.92);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 12px 32px rgba(0, 0, 0, 0.45);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 12px 32px rgba(0, 0, 0, 0.45);
 }
 
 statuspage > scrolledwindow > viewport > box > clamp > box > .title {
   font-family: "SF Pro Display", sans-serif;
   font-weight: 800;
+}
+
+/* ---------- Vinyl style (window.style-vinyl) ----------
+   No glass: the sidebar and player sit straight on the blurred cover, with a
+   soft shade behind them (drawn in glass.rs) and nothing outlined. The
+   player's cover is a turning record. What's selected or hovered takes the
+   cover's colour instead of a white box. */
+
+window.style-vinyl glass.player-bar {
+  padding: 4px 16px 4px 4px;
+}
+
+window.style-vinyl list.navigation-sidebar > row.nav {
+  color: rgba(255, 255, 255, 0.66);
+  transition: color 160ms ease-out, background-color 160ms ease-out;
+}
+
+window.style-vinyl list.navigation-sidebar > row:hover {
+  color: #ffffff;
+  background-color: color-mix(in srgb, var(--accent-color) 9%, transparent);
+}
+
+window.style-vinyl list.navigation-sidebar > row:selected {
+  color: #ffffff;
+  background-color: color-mix(in srgb, var(--accent-color) 18%, transparent);
+  box-shadow: none;
+}
+
+window.style-vinyl list.navigation-sidebar > row.nav:selected image {
+  color: var(--accent-color);
+}
+
+window.style-vinyl .track-row:hover {
+  background-color: color-mix(in srgb, var(--accent-color) 9%, transparent);
+}
+
+window.style-vinyl listview.tracks > row:selected .track-row,
+window.style-vinyl list.tracks > row:selected .track-row {
+  background-color: color-mix(in srgb, var(--accent-color) 17%, transparent);
+  box-shadow: none;
+}
+
+window.style-vinyl .track-columns {
+  border-bottom-color: color-mix(in srgb, var(--accent-color) 22%, transparent);
+}
+
+/* Buttons: bare icons until hovered. */
+window.style-vinyl headerbar button.image-button,
+window.style-vinyl headerbar menubutton > button,
+window.style-vinyl headerbar windowcontrols > button > image,
+window.style-vinyl button.glass-button {
+  background-color: transparent;
+  box-shadow: none;
+}
+
+window.style-vinyl headerbar button.image-button:hover,
+window.style-vinyl headerbar menubutton > button:hover,
+window.style-vinyl headerbar windowcontrols > button:hover > image,
+window.style-vinyl button.glass-button:hover {
+  background-color: color-mix(in srgb, var(--accent-color) 18%, transparent);
+}
+
+window.style-vinyl button.glass-button.active {
+  box-shadow: none;
+}
+
+/* Flat play buttons: a blurred glow under the hover zoom rendered as
+   cross-shaped streaks. */
+window.style-vinyl button.hero-play,
+window.style-vinyl button.play-button {
+  box-shadow: none;
+}
+
+/* Cards and the search field: dark sleeves instead of glass. */
+window.style-vinyl button.shortcut,
+window.style-vinyl button.top-result,
+window.style-vinyl entry.search-pill {
+  background-color: rgba(0, 0, 0, 0.26);
+  box-shadow: none;
+}
+
+window.style-vinyl button.shortcut:hover,
+window.style-vinyl button.top-result:hover,
+window.style-vinyl button.card-tile:hover {
+  background-color: color-mix(in srgb, var(--accent-color) 14%, rgba(0, 0, 0, 0.26));
+}
+
+window.style-vinyl entry.search-pill:focus-within {
+  background-color: color-mix(in srgb, var(--accent-color) 12%, rgba(0, 0, 0, 0.3));
+}
+
+window.style-vinyl scale.progress trough {
+  min-height: 3px;
+  background-color: rgba(255, 255, 255, 0.14);
+}
+
+window.style-vinyl scale.progress highlight {
+  min-height: 3px;
+}
+
+/* Album and playlist headers: the record peeking out of its sleeve casts
+   its own round shadow, the sleeve a square one. */
+.hero-art.sleeved {
+  box-shadow: none;
+  border-radius: 0;
+}
+
+cover.hero-sleeve {
+  border-radius: 14px;
+  box-shadow: 0 22px 54px rgba(0, 0, 0, 0.5);
+}
+
+cover.hero-record {
+  border-radius: 999px;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.5);
 }

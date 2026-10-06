@@ -141,6 +141,72 @@ thread_local! {
     /// Every page header (and its art), so they all follow the tier.
     static HEROES: RefCell<Vec<(glib::WeakRef<gtk::Box>, glib::WeakRef<gtk::Box>)>> = const { RefCell::new(Vec::new()) };
     static TIER: Cell<Tier> = const { Cell::new(Tier::Large) };
+    /// The Vinyl style: album and playlist covers have a record peeking out.
+    static VINYL: Cell<bool> = const { Cell::new(false) };
+}
+
+/// How far the record shows past a sleeve `px` wide.
+fn peek(px: i32) -> i32 {
+    px * 3 / 8
+}
+
+/// An album or playlist cover as a record sleeve: in the Vinyl style the
+/// record (the same art as its label) slides out from behind it as the page
+/// opens. The overlay's first child only holds the room for both.
+fn sleeve(url: Option<&str>) -> (gtk::Overlay, Cover) {
+    let room = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    let record = Cover::new(212, 0.0);
+    record.set_record(true);
+    record.add_css_class("hero-record");
+    record.set_url(url);
+    let cover = Cover::new(212, 14.0);
+    cover.add_css_class("hero-sleeve");
+    cover.set_url(url);
+    let overlay = gtk::Overlay::new();
+    overlay.set_child(Some(&room));
+    overlay.add_overlay(&record);
+    overlay.add_overlay(&cover);
+    (overlay, record)
+}
+
+/// Sizes a sleeve's cover, record and room for `px`, record shown or not.
+fn size_sleeve(overlay: &gtk::Overlay, px: i32) {
+    let vinyl = VINYL.get();
+    let mut child = overlay.first_child();
+    while let Some(widget) = child {
+        match widget.downcast_ref::<Cover>() {
+            Some(cover) => {
+                cover.set_size(px);
+                if cover.has_css_class("hero-record") {
+                    cover.set_visible(vinyl);
+                    cover.set_margin_start(if vinyl { peek(px) } else { 0 });
+                }
+            }
+            None => widget.set_size_request(px + if vinyl { peek(px) } else { 0 }, px),
+        }
+        child = widget.next_sibling();
+    }
+}
+
+/// Points a header's art (plain cover or sleeve) at a new image.
+fn set_art_url(art: &gtk::Box, url: &str) {
+    let Some(first) = art.first_child() else { return };
+    if let Some(cover) = first.downcast_ref::<Cover>() {
+        cover.set_url(Some(url));
+    }
+    let mut child = first.downcast_ref::<gtk::Overlay>().and_then(|o| o.first_child());
+    while let Some(widget) = child {
+        if let Some(cover) = widget.downcast_ref::<Cover>() {
+            cover.set_url(Some(url));
+        }
+        child = widget.next_sibling();
+    }
+}
+
+/// Called when the style changes between Vinyl and glass.
+pub fn set_vinyl(vinyl: bool) {
+    VINYL.set(vinyl);
+    set_tier(TIER.get());
 }
 
 fn apply_tier(hero: &gtk::Box, art: &gtk::Box, tier: Tier) {
@@ -161,12 +227,18 @@ fn apply_tier(hero: &gtk::Box, art: &gtk::Box, tier: Tier) {
         Tier::Compact => hero.add_css_class("compact"),
         Tier::Large => {}
     }
-    // The cover, or the gradient tile standing in for one.
+    // The cover, the sleeve with its record, or the gradient tile standing
+    // in for a cover.
     if let Some(child) = art.first_child() {
         let px = tier.art();
-        match child.downcast::<Cover>() {
-            Ok(cover) => cover.set_size(px),
-            Err(tile) => tile.set_size_request(px, px),
+        if let Some(overlay) = child.downcast_ref::<gtk::Overlay>() {
+            size_sleeve(overlay, px);
+            art.set_css_classes(&["hero-art", "sleeved"]);
+        } else {
+            match child.downcast::<Cover>() {
+                Ok(cover) => cover.set_size(px),
+                Err(tile) => tile.set_size_request(px, px),
+            }
         }
     }
 }
@@ -406,15 +478,27 @@ impl SearchPage {
             .title("Find your next favourite")
             .description("Songs, artists, albums and playlists")
             .build();
-        let results = vbox(40);
-        results.set_margin_top(12);
-        results.set_margin_bottom(40);
+        let results = ResultsView::new();
         let nothing = adw::StatusPage::builder()
             .icon_name("onify-system-search-symbolic")
             .title("No results")
             .build();
+        // Top result beside the songs while there's room for both, above
+        // them when there isn't (judged by the page's own width, since the
+        // sidebar takes a share of the window).
+        let bin = adw::BreakpointBin::builder()
+            .width_request(240)
+            .height_request(200)
+            .child(&scrolled(&results.body))
+            .build();
+        // Side by side the songs need ~420px next to the 300px tile.
+        let narrow = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 800sp").unwrap());
+        narrow.add_setter(&results.top, "orientation", Some(&gtk::Orientation::Vertical.to_value()));
+        narrow.add_setter(&results.top, "spacing", Some(&36.to_value()));
+        narrow.add_setter(&results.best, "width-request", Some(&(-1).to_value()));
+        bin.add_breakpoint(narrow);
         stack.add_named(&empty, Some("empty"));
-        stack.add_named(&scrolled(&results), Some("results"));
+        stack.add_named(&bin, Some("results"));
         stack.add_named(&nothing, Some("nothing"));
         stack.add_named(&spinner(), Some("loading"));
         let page = page("Search", "search", &stack, &header);
@@ -463,6 +547,52 @@ impl SearchPage {
     }
 }
 
+/// The search results. The top row's boxes stay put between searches so
+/// the narrow-page breakpoint can rearrange them; only their contents change.
+#[derive(Clone)]
+struct ResultsView {
+    body: gtk::Box,
+    /// The top result and the songs, side by side or stacked.
+    top: gtk::Box,
+    best: gtk::Box,
+    songs: gtk::Box,
+}
+
+impl ResultsView {
+    fn new() -> Self {
+        let body = vbox(40);
+        body.set_margin_top(12);
+        body.set_margin_bottom(40);
+        // On the inset gutter, since the song rows carry 12px of padding; the
+        // tile and headings take those 12px as margins to line up with them.
+        let top = gtk::Box::builder().spacing(4).css_classes(["gutter-inset"]).build();
+        let best = vbox(12);
+        best.set_width_request(300);
+        best.set_margin_start(12);
+        best.set_margin_end(12);
+        let songs = vbox(12);
+        songs.set_hexpand(true);
+        top.append(&best);
+        top.append(&songs);
+        body.append(&top);
+        Self { body, top, best, songs }
+    }
+
+    fn clear(&self) {
+        for parent in [&self.best, &self.songs] {
+            while let Some(child) = parent.first_child() {
+                parent.remove(&child);
+            }
+        }
+        while let Some(child) = self.body.last_child() {
+            if child == self.top {
+                break;
+            }
+            self.body.remove(&child);
+        }
+    }
+}
+
 /// The best match, as a big glass tile.
 fn top_result(card: &Card) -> gtk::Widget {
     let button = gtk::Button::new();
@@ -488,40 +618,34 @@ fn top_result(card: &Card) -> gtk::Widget {
     button.upcast()
 }
 
-fn show_results(stack: &gtk::Stack, results: &gtk::Box, found: &SearchResults) {
-    while let Some(child) = results.first_child() {
-        results.remove(&child);
-    }
+fn show_results(stack: &gtk::Stack, results: &ResultsView, found: &SearchResults) {
+    results.clear();
     if found.tracks.is_empty() && found.artists.is_empty() && found.albums.is_empty() && found.playlists.is_empty() {
         stack.set_visible_child_name("nothing");
         return;
     }
 
-    let top = gtk::Box::builder().spacing(28).css_classes(["gutter"]).build();
     let best = found.artists.first().or(found.albums.first()).or(found.playlists.first());
+    results.best.set_visible(best.is_some());
     if let Some(best) = best {
-        let column = vbox(12);
-        column.append(&label("Top result", &["title-section"]));
+        results.best.append(&label("Top result", &["title-section"]));
         let tile = top_result(best);
         tile.set_vexpand(true);
-        column.append(&tile);
-        column.set_size_request(340, -1);
-        top.append(&column);
+        results.best.append(&tile);
     }
+    results.songs.set_visible(!found.tracks.is_empty());
     if !found.tracks.is_empty() {
-        let column = vbox(12);
-        column.set_hexpand(true);
-        column.append(&label("Songs", &["title-section"]));
+        let heading = label("Songs", &["title-section"]);
+        heading.set_margin_start(12);
+        results.songs.append(&heading);
         let uris: Vec<String> = found.tracks.iter().map(|t| t.uri.clone()).collect();
         let tracks: Vec<Track> = found.tracks.iter().take(5).cloned().collect();
         let list = short_list(&tracks, RowMode::Compact, move |i| {
             ctx().with_engine(|e| e.play_tracks(uris.clone(), i));
         });
-        list.set_margin_start(-12);
-        column.append(&list);
-        top.append(&column);
+        results.songs.append(&list);
     }
-    results.append(&top);
+    let results = &results.body;
 
     for (title, cards) in [
         ("Artists", &found.artists),
@@ -691,7 +815,13 @@ fn play_all(kind: Kind, context: &str, store: &gio::ListStore) {
 
 /// The gradient tile that stands in for a cover on Liked Songs and Local Files.
 fn icon_tile(icon: &str, class: &str) -> gtk::Widget {
-    let tile = gtk::Box::builder().width_request(212).height_request(212).build();
+    // Not expanding, or the centred icon's expand spreads to the header and
+    // the title drifts away from the tile.
+    let tile = gtk::Box::builder()
+        .width_request(212)
+        .height_request(212)
+        .hexpand(false)
+        .build();
     tile.add_css_class("icon-tile");
     tile.add_css_class(class);
     let image = gtk::Image::from_icon_name(icon);
@@ -709,13 +839,14 @@ pub fn tracks_page(kind: Kind, uri: &str, title: &str, images: &Images) -> adw::
         _ => uri.to_owned(),
     };
 
+    let mut record = None;
     let art: gtk::Widget = match kind {
         Kind::Liked => icon_tile("onify-heart-filled-symbolic", "liked-tile"),
         Kind::Local => icon_tile("onify-folder-music-symbolic", "local-tile"),
         _ => {
-            let cover = Cover::new(212, 14.0);
-            cover.set_url(images.pick(480));
-            cover.upcast()
+            let (sleeve, disc) = sleeve(images.pick(480));
+            record = Some(disc);
+            sleeve.upcast()
         }
     };
     let eyebrow = match kind {
@@ -750,10 +881,8 @@ pub fn tracks_page(kind: Kind, uri: &str, title: &str, images: &Images) -> adw::
                 t.set_label(&h.title);
             }
             s.set_label(&h.subtitle);
-            if let Some(cover) = art.upgrade().and_then(|a| a.first_child()).and_downcast::<Cover>() {
-                if let Some(url) = h.images.pick(480) {
-                    cover.set_url(Some(url));
-                }
+            if let (Some(art), Some(url)) = (art.upgrade(), h.images.pick(480)) {
+                set_art_url(&art, url);
             }
         }
     };
@@ -763,6 +892,12 @@ pub fn tracks_page(kind: Kind, uri: &str, title: &str, images: &Images) -> adw::
     let selection = gtk::SingleSelection::new(Some(loaded.store.clone()));
     selection.set_autoselect(false);
     selection.set_can_unselect(true);
+    selection.connect_selected_item_notify(|selection| {
+        let item = selection.selected_item().and_downcast::<glib::BoxedAnyObject>();
+        if let Some(track) = item.as_ref().and_then(|o| o.try_borrow::<Track>().ok()) {
+            super::track_row::want_plays(&track);
+        }
+    });
     let list = gtk::ListView::builder()
         .model(&selection)
         .factory(&factory(mode, header_widget.upcast()))
@@ -807,7 +942,34 @@ pub fn tracks_page(kind: Kind, uri: &str, title: &str, images: &Images) -> adw::
         None => loaded.listeners.borrow_mut().push(Box::new(update)),
     }
     let tag = if kind == Kind::Liked { "liked" } else { uri };
-    page(title, tag, &scroller, &header)
+    let page = page(title, tag, &scroller, &header);
+    if let Some(record) = record {
+        slide_out_on_show(&page, &record);
+    }
+    page
+}
+
+/// The record slides out of its sleeve each time the page comes into view.
+fn slide_out_on_show(page: &adw::NavigationPage, record: &Cover) {
+    let record = record.downgrade();
+    let slide: Rc<RefCell<Option<adw::TimedAnimation>>> = Rc::default();
+    page.connect_showing(move |_| {
+        let Some(record) = record.upgrade() else { return };
+        if !VINYL.get() {
+            return;
+        }
+        let to = peek(TIER.get().art()) as f64;
+        let weak = record.downgrade();
+        let target = adw::CallbackAnimationTarget::new(move |value| {
+            if let Some(record) = weak.upgrade() {
+                record.set_margin_start(value as i32);
+            }
+        });
+        let animation = adw::TimedAnimation::new(&record, 0.0, to, 700, target);
+        animation.set_easing(adw::Easing::EaseOutCubic);
+        animation.play();
+        slide.replace(Some(animation));
+    });
 }
 
 pub fn artist_page(card: &Card) -> adw::NavigationPage {

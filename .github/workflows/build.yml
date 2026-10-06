@@ -16,14 +16,22 @@ permissions:
 
 # onIfy needs GTK 4.20 and libadwaita 1.8, newer than Ubuntu ships, so every
 # platform builds against a rolling GTK: Arch, MSYS2 and Homebrew.
+#
+# Each job packages onIfy the way people install it (AppImage, installer,
+# .app), then smoke-tests the package: it must still be running 20 s after
+# launch, on a machine without that GTK installed where possible. A
+# screenshot of that run is uploaded next to the package.
 jobs:
     linux:
         name: Linux
         runs-on: ubuntu-latest
+        timeout-minutes: 60
         container: archlinux:latest
         steps:
             - name: Install Rust and GTK
-              run: pacman -Syu --noconfirm --needed base-devel git rust gtk4 libadwaita libpulse
+              run: >-
+                  pacman -Syu --noconfirm --needed base-devel git rust gtk4 libadwaita libpulse
+                  librsvg adwaita-icon-theme file xorg-server-xvfb xorg-xauth imagemagick mesa
 
             - uses: actions/checkout@v5
 
@@ -36,14 +44,41 @@ jobs:
                   CARGO_BUILD_JOBS: "2"
                   CARGO_PROFILE_RELEASE_LTO: "false"
 
+            - name: Package AppImage
+              run: packaging/linux/appimage.sh
+
+            - name: Smoke test
+              run: |
+                  xvfb-run -a -s "-screen 0 1280x820x24" sh -c '
+                      APPIMAGE_EXTRACT_AND_RUN=1 ./dist/onIfy-x86_64.AppImage &
+                      pid=$!
+                      sleep 20
+                      import -window root dist/screenshot-linux.png || true
+                      kill -0 $pid || { echo "onIfy quit on its own"; exit 1; }
+                      kill $pid
+                  '
+
             - uses: actions/upload-artifact@v4
               with:
                   name: onIfy-linux-x86_64
                   path: target/release/onify
 
+            - uses: actions/upload-artifact@v4
+              with:
+                  name: onIfy-linux-x86_64-AppImage
+                  path: dist/onIfy-x86_64.AppImage
+
+            - uses: actions/upload-artifact@v4
+              if: always()
+              with:
+                  name: screenshot-linux
+                  path: dist/screenshot-linux.png
+                  if-no-files-found: ignore
+
     windows:
         name: Windows
         runs-on: windows-latest
+        timeout-minutes: 60
         defaults:
             run:
                 shell: msys2 {0}
@@ -59,30 +94,87 @@ jobs:
                       pkgconf:p
                       gtk4:p
                       libadwaita:p
+                      librsvg:p
+                      adwaita-icon-theme:p
 
             - uses: actions/checkout@v5
 
             - run: cargo build --release --locked
 
+            - name: Bundle GTK
+              run: packaging/windows/bundle.sh
+
+            - name: Build installer
+              shell: pwsh
+              run: |
+                  $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+                  if (-not (Test-Path $iscc)) { choco install innosetup --no-progress -y }
+                  $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"').Matches[0].Groups[1].Value
+                  & $iscc "/DAppVersion=$version" packaging\windows\onIfy.iss
+                  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+            # Plain PowerShell has no MSYS2 on its PATH, so a missing DLL in
+            # the bundle fails here instead of being found in MSYS2.
+            - name: Smoke test
+              shell: pwsh
+              run: |
+                  $app = Start-Process -FilePath dist\onIfy\bin\onify.exe -PassThru
+                  Start-Sleep -Seconds 20
+                  Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+                  $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+                  $shot = New-Object System.Drawing.Bitmap $screen.Width, $screen.Height
+                  [System.Drawing.Graphics]::FromImage($shot).CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
+                  $shot.Save("$PWD\dist\screenshot-windows.png")
+                  if ($app.HasExited) { Write-Error "onIfy quit on its own (exit code $($app.ExitCode))"; exit 1 }
+                  Stop-Process -Id $app.Id
+
             - uses: actions/upload-artifact@v4
               with:
-                  name: onIfy-windows-x86_64
-                  path: target/release/onify.exe
+                  name: onIfy-windows-x86_64-setup
+                  path: dist/onIfy-setup-x86_64.exe
+
+            - uses: actions/upload-artifact@v4
+              if: always()
+              with:
+                  name: screenshot-windows
+                  path: dist/screenshot-windows.png
+                  if-no-files-found: ignore
 
     macos:
         name: macOS
         runs-on: macos-latest # Apple Silicon
+        timeout-minutes: 60
         steps:
             - uses: actions/checkout@v5
 
             - name: Install GTK
-              run: brew install gtk4 libadwaita pkgconf
+              run: brew install gtk4 libadwaita pkgconf librsvg adwaita-icon-theme dylibbundler
 
             - uses: Swatinem/rust-cache@v2
 
             - run: cargo build --release --locked
 
+            - name: Bundle onIfy.app
+              run: packaging/macos/bundle.sh
+
+            # bundle.sh already fails if anything still links into Homebrew.
+            - name: Smoke test
+              run: |
+                  dist/onIfy.app/Contents/MacOS/onify &
+                  pid=$!
+                  sleep 20
+                  screencapture -x dist/screenshot-macos.png || true
+                  kill -0 $pid || { echo "onIfy quit on its own"; exit 1; }
+                  kill $pid
+
             - uses: actions/upload-artifact@v4
               with:
                   name: onIfy-macos-arm64
-                  path: target/release/onify
+                  path: dist/onIfy-macos-arm64.dmg
+
+            - uses: actions/upload-artifact@v4
+              if: always()
+              with:
+                  name: screenshot-macos
+                  path: dist/screenshot-macos.png
+                  if-no-files-found: ignore

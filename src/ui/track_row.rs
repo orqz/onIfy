@@ -30,13 +30,16 @@ pub enum RowMode {
 pub struct Parts {
     /// Number, playing indicator or ▶, crossfading between them.
     lead: gtk::Stack,
-    /// Play counts are for album and artist pages, not playlists.
-    show_plays: bool,
+    /// Album pages, artist pages and search show play counts in their own
+    /// column; playlists show the selected song's after its artists, so their
+    /// columns never shift.
+    plays_column: bool,
     number: gtk::Label,
     cover: Option<Cover>,
     title: gtk::Label,
     explicit: gtk::Label,
     artists: gtk::Label,
+    inline_plays: gtk::Label,
     album: gtk::Label,
     plays: gtk::Label,
     duration: gtk::Label,
@@ -90,6 +93,33 @@ thread_local! {
     static HOVER: RefCell<Option<glib::SourceId>> = const { RefCell::new(None) };
     static PRELOADED: RefCell<String> = const { RefCell::new(String::new()) };
     static NOW_PLAYING: RefCell<String> = const { RefCell::new(String::new()) };
+    /// Play counts fetched for selected songs, by URI.
+    static PLAYS: RefCell<std::collections::HashMap<String, u64>> = RefCell::default();
+}
+
+/// Shows a selected song's play count, asking Spotify for it if its list
+/// didn't come with one.
+pub fn want_plays(track: &Track) {
+    if track.plays > 0 || !track.uri.starts_with("spotify:track:") {
+        return;
+    }
+    if PLAYS.with_borrow(|p| p.contains_key(&track.uri)) {
+        return;
+    }
+    let Some(api) = super::ctx().api() else { return };
+    let uri = track.uri.clone();
+    glib::spawn_future_local(async move {
+        let asked = uri.clone();
+        let Ok(plays) = crate::rt::spawn(async move { api.plays(&asked).await }).await else { return };
+        PLAYS.with_borrow_mut(|p| p.insert(uri.clone(), plays));
+        ROWS.with_borrow(|rows| {
+            for row in rows.iter().filter_map(|r| r.upgrade()) {
+                if row.track().is_some_and(|t| t.uri == uri) {
+                    row.show_plays(plays);
+                }
+            }
+        });
+    });
 }
 
 /// Highlights the playing song in every visible list.
@@ -183,8 +213,16 @@ impl TrackRow {
         title_line.append(&explicit);
         let artists = ellipsized("track-artists");
         dim(&artists);
+        let inline_plays = gtk::Label::builder().visible(false).build();
+        inline_plays.add_css_class("track-artists");
+        inline_plays.add_css_class("track-plays-inline");
+        inline_plays.add_css_class("numeric");
+        dim(&inline_plays);
+        let artist_line = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        artist_line.append(&artists);
+        artist_line.append(&inline_plays);
         title_box.append(&title_line);
-        title_box.append(&artists);
+        title_box.append(&artist_line);
         columns.append(&title_box);
 
         let album = ellipsized("track-album");
@@ -204,9 +242,7 @@ impl TrackRow {
         dim(&plays);
         row.append(&plays);
 
-        let duration = gtk::Label::builder().width_chars(6).xalign(1.0).build();
-        duration.add_css_class("numeric");
-        dim(&duration);
+        let duration = duration_label();
         row.append(&duration);
 
         play.connect_clicked(glib::clone!(
@@ -216,12 +252,13 @@ impl TrackRow {
         ));
         let _ = row.imp().parts.set(Parts {
             lead,
-            show_plays: mode != RowMode::Playlist,
+            plays_column: mode != RowMode::Playlist,
             number,
             cover,
             title,
             explicit,
             artists,
+            inline_plays,
             album,
             plays,
             duration,
@@ -293,15 +330,31 @@ impl TrackRow {
             parts.artists.set_label(&track.artist_names());
             parts.album.set_label(&track.album.name);
             parts.duration.set_label(&format_duration(track.duration_ms));
-            parts.plays.set_visible(parts.show_plays && track.plays > 0);
-            parts.plays.set_label(&group_digits(track.plays));
             if let Some(cover) = &parts.cover {
                 cover.set_url(track.images.pick(64));
             }
             self.set_opacity(if track.playable { 1.0 } else { 0.45 });
         }
         self.imp().item.replace(Some(item.clone()));
+        let plays = {
+            let track = item.borrow::<Track>();
+            match track.plays {
+                0 => PLAYS.with_borrow(|p| p.get(&track.uri).copied()).unwrap_or(0),
+                n => n,
+            }
+        };
+        self.show_plays(plays);
         self.refresh_playing();
+    }
+
+    /// Fills in the play count (0 for none); CSS shows it for the selected row.
+    fn show_plays(&self, plays: u64) {
+        let parts = self.imp().parts.get().unwrap();
+        let known = plays > 0;
+        parts.plays.set_visible(parts.plays_column && known);
+        parts.plays.set_label(&group_digits(plays));
+        parts.inline_plays.set_visible(!parts.plays_column && known);
+        parts.inline_plays.set_label(&format!("  ·  {} plays", group_digits(plays)));
     }
 
     pub fn set_position(&self, position: u32) {
@@ -404,6 +457,13 @@ pub fn set_album_column(shown: bool) {
     });
 }
 
+fn duration_label() -> gtk::Label {
+    let duration = gtk::Label::builder().width_chars(6).xalign(1.0).build();
+    duration.add_css_class("numeric");
+    dim(&duration);
+    duration
+}
+
 pub fn format_duration(ms: u32) -> String {
     let s = ms / 1000;
     if s >= 3600 {
@@ -439,8 +499,14 @@ pub fn column_header(mode: RowMode) -> gtk::Box {
         columns.append(&heading);
     }
     header.append(&columns);
-    let time = caption("Time", 1.0);
-    time.set_width_chars(6);
+    // As wide as a row's duration: same label, same font, never shown. (The
+    // caption's own smaller font made it narrower, shifting the Album column.)
+    let time = gtk::Stack::new();
+    let sizer = duration_label();
+    time.add_child(&sizer);
+    let heading = caption("Time", 1.0);
+    time.add_child(&heading);
+    time.set_visible_child(&heading);
     header.append(&time);
     header
 }
@@ -509,5 +575,10 @@ pub fn short_list(tracks: &[Track], mode: RowMode, on_activate: impl Fn(usize) +
         list.append(&row);
     }
     list.connect_row_activated(move |_, row| on_activate(row.index() as usize));
+    list.connect_row_selected(|_, row| {
+        if let Some(track) = row.and_then(|r| r.child()).and_downcast::<TrackRow>().and_then(|r| r.track()) {
+            want_plays(&track);
+        }
+    });
     list
 }

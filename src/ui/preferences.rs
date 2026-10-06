@@ -58,6 +58,21 @@ fn look_group() -> adw::PreferencesGroup {
         ctx().backdrop.set_mood(mood);
     });
     group.add(&background);
+
+    let styles = gtk::StringList::new(&["Vinyl (experimental)", "Liquid glass"]);
+    let style = adw::ComboRow::builder()
+        .title("Style")
+        .subtitle("Vinyl drops the glass panels and spins the record while music plays")
+        .model(&styles)
+        .selected(if ctx().settings.borrow().style == "glass" { 1 } else { 0 })
+        .build();
+    style.connect_selected_notify(|row| {
+        let name = if row.selected() == 1 { "glass" } else { "vinyl" };
+        ctx().settings.borrow_mut().style = name.to_owned();
+        save();
+        super::apply_style(name);
+    });
+    group.add(&style);
     group
 }
 

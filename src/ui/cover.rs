@@ -1,4 +1,6 @@
 //! A square cover image with rounded corners that fades in when it arrives.
+//! As a record (the Vinyl style's player), the cover is the label of a black
+//! disc that turns while music plays.
 
 use std::cell::{Cell, RefCell};
 
@@ -19,6 +21,10 @@ mod imp {
         pub texture: RefCell<Option<gdk::Texture>>,
         pub opacity: Cell<f64>,
         pub fade: RefCell<Option<adw::TimedAnimation>>,
+        pub record: Cell<bool>,
+        /// The record's turn, in degrees.
+        pub angle: Cell<f64>,
+        pub spin: RefCell<Option<gtk::TickCallbackId>>,
     }
 
     #[glib::object_subclass]
@@ -34,6 +40,59 @@ mod imp {
 
     impl ObjectImpl for Cover {}
 
+    fn circle(center: &graphene::Point, r: f32) -> gsk::RoundedRect {
+        let rect = graphene::Rect::new(center.x() - r, center.y() - r, r * 2.0, r * 2.0);
+        gsk::RoundedRect::from_rect(rect, r)
+    }
+
+    impl Cover {
+        /// A black disc with faint grooves, the cover as its label turning
+        /// with the record, and light that stays put as it spins.
+        fn snapshot_record(&self, snapshot: &gtk::Snapshot, bounds: &graphene::Rect) {
+            let center = bounds.center();
+            let r = bounds.width() / 2.0;
+            snapshot.push_rounded_clip(&circle(&center, r));
+            snapshot.append_color(&gdk::RGBA::new(0.045, 0.045, 0.055, 1.0), bounds);
+            for (f, alpha) in [(0.94, 0.07), (0.86, 0.05), (0.78, 0.06), (0.70, 0.04)] {
+                snapshot.append_border(&circle(&center, r * f), &[0.6; 4], &[gdk::RGBA::new(1.0, 1.0, 1.0, alpha); 4]);
+            }
+
+            let label = r * 0.62;
+            snapshot.save();
+            snapshot.translate(&center);
+            snapshot.rotate(self.angle.get() as f32);
+            snapshot.translate(&graphene::Point::new(-center.x(), -center.y()));
+            snapshot.push_rounded_clip(&circle(&center, label));
+            let label_rect = graphene::Rect::new(center.x() - label, center.y() - label, label * 2.0, label * 2.0);
+            snapshot.append_color(&gdk::RGBA::new(0.16, 0.16, 0.16, 1.0), &label_rect);
+            if let Some(texture) = self.texture.borrow().as_ref() {
+                snapshot.push_opacity(self.opacity.get());
+                snapshot.append_scaled_texture(texture, gsk::ScalingFilter::Linear, &label_rect);
+                snapshot.pop();
+            }
+            snapshot.pop();
+            snapshot.restore();
+
+            // The spindle hole, and a sheen across the vinyl.
+            snapshot.push_rounded_clip(&circle(&center, (r * 0.07).max(1.5)));
+            snapshot.append_color(&gdk::RGBA::new(0.02, 0.02, 0.03, 1.0), bounds);
+            snapshot.pop();
+            snapshot.append_linear_gradient(
+                bounds,
+                &graphene::Point::new(bounds.x(), bounds.y()),
+                &graphene::Point::new(bounds.x() + bounds.width(), bounds.y() + bounds.height()),
+                &[
+                    gsk::ColorStop::new(0.0, gdk::RGBA::new(1.0, 1.0, 1.0, 0.0)),
+                    gsk::ColorStop::new(0.35, gdk::RGBA::new(1.0, 1.0, 1.0, 0.10)),
+                    gsk::ColorStop::new(0.5, gdk::RGBA::new(1.0, 1.0, 1.0, 0.0)),
+                    gsk::ColorStop::new(0.75, gdk::RGBA::new(1.0, 1.0, 1.0, 0.06)),
+                    gsk::ColorStop::new(1.0, gdk::RGBA::new(1.0, 1.0, 1.0, 0.0)),
+                ],
+            );
+            snapshot.pop();
+        }
+    }
+
     impl WidgetImpl for Cover {
         fn measure(&self, _: gtk::Orientation, _: i32) -> (i32, i32, i32, i32) {
             let size = self.size.get();
@@ -46,6 +105,10 @@ mod imp {
             let (w, h) = (widget.width() as f32, widget.height() as f32);
             let side = w.min(h);
             let bounds = graphene::Rect::new((w - side) / 2.0, (h - side) / 2.0, side, side);
+            if self.record.get() {
+                self.snapshot_record(snapshot, &bounds);
+                return;
+            }
             let radius = self.radius.get().min(bounds.width() / 2.0);
             snapshot.push_rounded_clip(&gsk::RoundedRect::from_rect(bounds, radius));
             let opacity = self.opacity.get();
@@ -94,6 +157,44 @@ impl Cover {
         }
         imp.size.set(size);
         self.queue_resize();
+    }
+
+    /// Draws the cover as a record (see the module docs).
+    pub fn set_record(&self, record: bool) {
+        self.imp().record.set(record);
+        if !record {
+            self.set_spinning(false);
+        }
+        self.queue_draw();
+    }
+
+    /// Turns the record while music plays, at 10 rpm, unless animations are
+    /// off. Each frame redraws only this small disc.
+    pub fn set_spinning(&self, on: bool) {
+        let imp = self.imp();
+        let animations = gtk::Settings::default().is_none_or(|s| s.is_gtk_enable_animations());
+        let on = on && imp.record.get() && animations;
+        if on == imp.spin.borrow().is_some() {
+            return;
+        }
+        if !on {
+            if let Some(id) = imp.spin.take() {
+                id.remove();
+            }
+            return;
+        }
+        let last = Cell::new(None::<i64>);
+        let id = self.add_tick_callback(move |cover, clock| {
+            let now = clock.frame_time();
+            if let Some(before) = last.replace(Some(now)) {
+                let degrees = (now - before) as f64 / 1_000_000.0 * 60.0;
+                let imp = cover.imp();
+                imp.angle.set((imp.angle.get() + degrees) % 360.0);
+                cover.queue_draw();
+            }
+            glib::ControlFlow::Continue
+        });
+        imp.spin.replace(Some(id));
     }
 
     pub fn set_url(&self, url: Option<&str>) {

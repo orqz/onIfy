@@ -71,6 +71,7 @@ pub struct Ctx {
     window: adw::ApplicationWindow,
     toasts: adw::ToastOverlay,
     backdrop: Backdrop,
+    host: GlassHost,
     root: gtk::Stack,
     login: Login,
     split: adw::NavigationSplitView,
@@ -159,6 +160,26 @@ where
 
 pub fn startup(_: &adw::Application) {
     adw::StyleManager::default().set_color_scheme(adw::ColorScheme::ForceDark);
+    // Windows and macOS take the taskbar/dock icon from here.
+    gtk::Window::set_default_icon_name(APP_ID);
+    // The sidebar already shows onIfy's logo; drop the second, smaller one
+    // some desktops add beside the window buttons.
+    if let Some(settings) = gtk::Settings::default() {
+        strip_window_icon(&settings);
+        settings.connect_gtk_decoration_layout_notify(strip_window_icon);
+    }
+}
+
+fn strip_window_icon(settings: &gtk::Settings) {
+    let Some(layout) = settings.gtk_decoration_layout() else { return };
+    if !layout.contains("icon") {
+        return;
+    }
+    let sides: Vec<String> = layout
+        .split(':')
+        .map(|side| side.split(',').filter(|b| *b != "icon").collect::<Vec<_>>().join(","))
+        .collect();
+    settings.set_gtk_decoration_layout(Some(&sides.join(":")));
 }
 
 pub fn activate(app: &adw::Application) {
@@ -215,6 +236,9 @@ pub fn activate(app: &adw::Application) {
     let host = GlassHost::new(&backdrop, &root, &bar.widget);
     host.set_lane(&content);
     host.add_panel(&sidebar_glass);
+    // The player only shows over the app itself, never the login page (which
+    // the stack starts on without notifying).
+    bar.widget.set_visible(false);
     root.connect_visible_child_name_notify(glib::clone!(
         #[weak(rename_to = bar)]
         bar.widget,
@@ -222,6 +246,7 @@ pub fn activate(app: &adw::Application) {
     ));
     let toasts = adw::ToastOverlay::new();
     toasts.set_child(Some(&host));
+    let style = settings.style.clone();
     window.set_content(Some(&toasts));
 
     // Window size tiers: pages scale their headers, gutters and rows (see
@@ -262,6 +287,7 @@ pub fn activate(app: &adw::Application) {
         window: window.clone(),
         toasts,
         backdrop,
+        host,
         root,
         login,
         split,
@@ -298,6 +324,7 @@ pub fn activate(app: &adw::Application) {
         let _ = c.set(ctx.clone());
     });
     tier_classes(&ctx.window, pages::tier());
+    apply_style(&style);
 
     ctx.bar.set_volume(ctx.settings.borrow().volume);
     // The lyrics button lights up while lyrics are showing.
@@ -564,6 +591,22 @@ fn tier_classes(window: &adw::ApplicationWindow, tier: pages::Tier) {
         pages::Tier::Compact => window.add_css_class("tier-compact"),
         pages::Tier::Large => {}
     }
+}
+
+/// "vinyl": no glass, panels straight on the cover with a soft shade, the
+/// player's cover a turning record, accents taken from the cover (style.css,
+/// `window.style-vinyl`). "glass": the liquid glass look.
+pub fn apply_style(name: &str) {
+    let ctx = ctx();
+    let vinyl = name != "glass";
+    if vinyl {
+        ctx.window.add_css_class("style-vinyl");
+    } else {
+        ctx.window.remove_css_class("style-vinyl");
+    }
+    ctx.host.set_shade_only(vinyl);
+    ctx.bar.set_record(vinyl);
+    pages::set_vinyl(vinyl);
 }
 
 /// Off means onIfy's own animations and transitions are skipped; on follows
@@ -1068,6 +1111,21 @@ fn install_actions(app: &adw::Application) {
     if std::env::var_os("ONIFY_DEV").is_some() {
         // Plays one song (Spotify or local) as if clicked, for testing.
         with_string("dev-play", |uri| ctx().with_engine(|e| e.play_tracks(vec![uri.to_owned()], 0)));
+        // Opens home, search, liked or local, as the sidebar would.
+        with_string("dev-route", |name| {
+            let route = match name {
+                "home" => Route::Home,
+                "search" => Route::Search,
+                "liked" => Route::Card(liked_card()),
+                "local" => Route::Card(local_card()),
+                _ => return,
+            };
+            navigate(route, true);
+        });
+        with_string("dev-search", |query| {
+            navigate(Route::Search, true);
+            ctx().search.entry.set_text(query);
+        });
         with_string("dev-render", |path| {
             // A widget paintable only fills in on the next redraw, so ask for
             // one and save a moment later.

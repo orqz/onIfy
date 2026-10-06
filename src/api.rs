@@ -27,6 +27,7 @@ const DEFAULT_HASHES: &[(&str, &str)] = &[
     ("searchDesktop", "1148393611bbc58e84e47aed35ecc731275df9f9eb660956962e352dd3631d89"),
     ("fetchPlaylist", "8964e8eafb21aa992a7d951d256d83285c04be2105d209262901de70cb97584a"),
     ("getAlbum", "6a74b456cd1735c9193d9e8ec8cc5184cad7ce13572210315229db3975964361"),
+    ("getTrack", "a8ef9e9f02b836feb0da3003c31dbb30decc6f4b473ef89ca88c882386d668de"),
     ("queryArtistOverview", "9f8134ef565e78621f1e1793555bd6633c5ac144ae0f89604ed3ae3f80b3c8e6"),
     ("home", "76243c78b0e20ecdbe41b794dec8cbe73f75e585b0a7201b8d2e84578412847a"),
     ("libraryV3", "390c78e5b951029bad359785e69b07b536a509c581cbcd0aded5e5067f187455"),
@@ -812,6 +813,18 @@ impl Api {
             lines,
             provider: str_of(&l["providerDisplayName"]),
         }))
+    }
+
+    /// How many times a song has been played on Spotify. Playlists don't
+    /// include it, so it's asked for when a song is selected.
+    pub async fn plays(&self, track_uri: &str) -> Result<u64> {
+        let v = self.query("getTrack", json!({ "uri": track_uri })).await?;
+        let count = &v["trackUnion"]["playcount"];
+        count
+            .as_str()
+            .and_then(|p| p.parse().ok())
+            .or(count.as_u64())
+            .ok_or_else(|| "no play count".to_owned())
     }
 
     /// The album a track belongs to, for "Go to album" from the player bar.

@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Name=onIfy
+GenericName=Music Player
+Comment=A smooth, lightweight Spotify client
+Exec=onify %U
+Icon=dev.orqz.onIfy
+Terminal=false
+Categories=AudioVideo;Audio;Player;GTK;
+Keywords=spotify;music;player;
+MimeType=x-scheme-handler/spotify;
+StartupNotify=true
+StartupWMClass=dev.orqz.onIfy
+DBusActivatable=false

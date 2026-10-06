@@ -1,5 +1,8 @@
 //! onIfy: a native Spotify client that stays smooth and light.
 
+// Release builds on Windows open no console window next to onIfy's own.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod api;
 mod audio;
 mod covers;
@@ -21,6 +24,8 @@ use adw::prelude::*;
 use gtk::{gio, glib};
 
 fn main() -> glib::ExitCode {
+    #[cfg(target_os = "macos")]
+    use_bundled_gtk();
     memory::init();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn,onify=info"))
         .init();
@@ -43,4 +48,36 @@ fn main() -> glib::ExitCode {
     // `onify spotify:album:…` or an open.spotify.com link opens that page.
     app.connect_open(ui::open_links);
     app.run()
+}
+
+/// Inside onIfy.app, GTK's icons, settings schemas and image loaders ship in
+/// Contents/Resources rather than Homebrew's prefix (packaging/macos). Windows
+/// needs nothing like this: GTK finds bin/../share there by itself.
+#[cfg(target_os = "macos")]
+fn use_bundled_gtk() {
+    let Some(resources) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| Some(exe.parent()?.parent()?.join("Resources")))
+        .filter(|r| r.join("share").is_dir())
+    else {
+        return;
+    };
+    let pixbuf = resources.join("lib/gdk-pixbuf-2.0/2.10.0");
+    // The loader list names each loader by full path, which depends on where
+    // the app was put, so it's written out fresh on every start.
+    let cache = glib::user_cache_dir().join("onify").join("loaders.cache");
+    let loaders = pixbuf.join("loaders");
+    let listed = std::fs::read_to_string(pixbuf.join("loaders.cache.in"))
+        .map(|list| list.replace("@LOADERS@", &loaders.to_string_lossy()));
+    let written = listed.is_ok_and(|list| {
+        std::fs::create_dir_all(cache.parent().unwrap()).is_ok() && std::fs::write(&cache, list).is_ok()
+    });
+    // Nothing else is running yet.
+    unsafe {
+        std::env::set_var("XDG_DATA_DIRS", resources.join("share"));
+        std::env::set_var("GSETTINGS_SCHEMA_DIR", resources.join("share/glib-2.0/schemas"));
+        if written {
+            std::env::set_var("GDK_PIXBUF_MODULE_FILE", &cache);
+        }
+    }
 }
