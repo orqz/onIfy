@@ -518,7 +518,9 @@ fn build_sidebar() -> (adw::NavigationPage, gtk::ListBox, Glass) {
         .menu_model(&menu)
         .tooltip_text("Main Menu")
         .build();
-    let brand = gtk::Box::builder().spacing(10).margin_start(6).build();
+    // Logo centred over the menu icons below it, the name level with their
+    // labels.
+    let brand = gtk::Box::builder().spacing(8).margin_start(12).build();
     // The logo in the playing cover's colour (style.css, .brand-logo).
     let logo = gtk::Image::from_icon_name("onify-logo-symbolic");
     logo.add_css_class("brand-logo");
