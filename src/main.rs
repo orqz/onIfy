@@ -17,6 +17,7 @@ mod rt;
 mod settings;
 mod spotify;
 mod ui;
+mod update;
 
 use adw::prelude::*;
 use gtk::{gio, glib};

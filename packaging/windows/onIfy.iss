@@ -39,3 +39,5 @@ Name: "{autodesktop}\onIfy"; Filename: "{app}\bin\onify.exe"; IconFilename: "{ap
 
 [Run]
 Filename: "{app}\bin\onify.exe"; Description: "{cm:LaunchProgram,onIfy}"; Flags: nowait postinstall skipifsilent
+; onIfy's own updater runs this installer silently, then expects onIfy back.
+Filename: "{app}\bin\onify.exe"; Flags: nowait; Check: WizardSilent

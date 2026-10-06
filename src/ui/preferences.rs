@@ -12,6 +12,7 @@ pub fn present(window: &adw::ApplicationWindow) {
     page.add(&look_group());
     page.add(&performance_group());
     page.add(&local_group());
+    page.add(&updates_group());
     let dialog = adw::PreferencesDialog::builder().title("Preferences").build();
     dialog.add(&page);
     dialog.present(Some(window));
@@ -173,4 +174,21 @@ fn change_folders(change: impl FnOnce(&mut Vec<PathBuf>)) {
     change(&mut ctx.settings.borrow_mut().local_folders);
     save();
     super::local_folders_changed();
+}
+
+
+fn updates_group() -> adw::PreferencesGroup {
+    let group = adw::PreferencesGroup::builder()
+        .title("Updates")
+        .description(format!("This is onIfy {}.", crate::update::current()))
+        .build();
+    let active = ctx().settings.borrow().check_updates;
+    group.add(&switch("Check for Updates", "Asks before installing anything", active, |on| {
+        ctx().settings.borrow_mut().check_updates = on;
+        save();
+    }));
+    let now = adw::ButtonRow::builder().title("Check Now").build();
+    now.connect_activated(|_| super::updater::check(true));
+    group.add(&now);
+    group
 }

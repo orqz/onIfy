@@ -1,0 +1,24 @@
+pkgbase = onify
+	pkgdesc = A smooth, lightweight Spotify client (needs Spotify Premium)
+	pkgver = 0.1.1
+	pkgrel = 1
+	url = https://github.com/orqz/onIfy
+	arch = x86_64
+	arch = aarch64
+	license = MIT
+	makedepends = cargo
+	makedepends = git
+	depends = gtk4
+	depends = libadwaita
+	depends = pango
+	depends = graphene
+	depends = glib2
+	depends = libpulse
+	depends = openssl
+	depends = libgcc
+	depends = glibc
+	depends = hicolor-icon-theme
+	source = onify::git+https://github.com/orqz/onIfy.git#tag=v0.1.1
+	sha256sums = SKIP
+
+pkgname = onify

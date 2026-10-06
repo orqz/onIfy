@@ -13,6 +13,8 @@ pub struct Settings {
     pub background: String,
     /// The look: "vinyl" (no glass, a turning record) or "glass".
     pub style: String,
+    /// Ask when a new version is out (see crate::update).
+    pub check_updates: bool,
     /// Performance switches.
     pub animations: bool,
     pub cover_background: bool,
@@ -43,6 +45,7 @@ impl Settings {
             },
             background: text("background"),
             style: v["style"].as_str().unwrap_or("vinyl").to_owned(),
+            check_updates: v["check_updates"].as_bool().unwrap_or(true),
             animations: v["animations"].as_bool().unwrap_or(true),
             cover_background: v["cover_background"].as_bool().unwrap_or(true),
             hover_preload: v["hover_preload"].as_bool().unwrap_or(true),
@@ -61,6 +64,7 @@ impl Settings {
             "local_folders": self.local_folders,
             "background": self.background,
             "style": self.style,
+            "check_updates": self.check_updates,
             "animations": self.animations,
             "cover_background": self.cover_background,
             "hover_preload": self.hover_preload,

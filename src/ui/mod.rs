@@ -9,6 +9,7 @@ mod pages;
 mod player_bar;
 mod preferences;
 mod track_row;
+mod updater;
 
 use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::HashMap;
@@ -345,18 +346,9 @@ pub fn activate(app: &adw::Application) {
         }
     });
 
-    window.connect_close_request(|window| {
-        // Let Spotify know this device is going away, then exit.
-        let ctx = self::ctx();
-        ctx.generation.set(ctx.generation.get() + 1);
-        if let Some(engine) = ctx.engine.take() {
-            engine.shutdown();
-            window.set_visible(false);
-            let app = ctx.app.clone();
-            glib::timeout_add_local_once(Duration::from_millis(300), move || app.quit());
-            return glib::Propagation::Stop;
-        }
-        glib::Propagation::Proceed
+    window.connect_close_request(|_| {
+        quit();
+        glib::Propagation::Stop
     });
 
     match spotify::cached_credentials() {
@@ -371,6 +363,7 @@ pub fn activate(app: &adw::Application) {
 
     integrations::start(window.upcast_ref());
     images::prune_disk_cache();
+    updater::start();
 }
 
 fn liked_card() -> Card {
@@ -1085,9 +1078,7 @@ fn install_actions(app: &adw::Application) {
     action("logout", logout);
     action("lyrics", toggle_lyrics);
     action("preferences", || preferences::present(&ctx().window));
-    action("quit", || {
-        ctx().window.close();
-    });
+    action("quit", quit);
     action("about", || {
         let about = adw::AboutDialog::builder()
             .application_name("onIfy")
@@ -1126,6 +1117,7 @@ fn install_actions(app: &adw::Application) {
             };
             navigate(route, true);
         });
+        with_string("dev-update", |_| updater::update_now());
         with_string("dev-search", |query| {
             navigate(Route::Search, true);
             ctx().search.entry.set_text(query);
@@ -1204,8 +1196,22 @@ pub fn raise() {
     ctx().window.present();
 }
 
+/// Lets Spotify know this device is going away, then exits. Not through
+/// closing the window: with a dialog open (Preferences), libadwaita closes
+/// the dialog instead and onIfy would keep running (which stalled updates).
 pub fn quit() {
-    ctx().window.close();
+    let ctx = ctx();
+    ctx.generation.set(ctx.generation.get() + 1);
+    ctx.window.set_visible(false);
+    let goodbye = match ctx.engine.take() {
+        Some(engine) => {
+            engine.shutdown();
+            300
+        }
+        None => 0,
+    };
+    let app = ctx.app.clone();
+    glib::timeout_add_local_once(Duration::from_millis(goodbye), move || app.quit());
 }
 
 pub fn open_links(app: &adw::Application, files: &[gio::File], _hint: &str) {
