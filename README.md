@@ -25,7 +25,7 @@ Needs Spotify Premium.
 Grab the [latest release](https://github.com/orqz/onIfy/releases/latest):
 - Windows: `onIfy-setup-x86_64.exe`
 - macOS (Apple Silicon, 15+): `onIfy-macos-arm64.dmg`. It isn't notarized, so right click → Open the first time
-- Linux: Flatpak coming soon, use the AppImage until then (needs an up to date distro)
+- Linux: `onIfy-x86_64.flatpak`, install it with `flatpak install --user onIfy-x86_64.flatpak`
 
 ## Join our Discord Server
 
