@@ -14,13 +14,14 @@ concurrency:
 permissions:
     contents: read
 
-# onIfy needs GTK 4.20 and libadwaita 1.8, newer than Ubuntu ships, so every
-# platform builds against a rolling GTK: Arch, MSYS2 and Homebrew.
+# onIfy needs GTK 4.20 and libadwaita 1.8, newer than Ubuntu ships: Linux
+# builds the Flatpak on the GNOME 49 runtime, Windows and macOS against
+# MSYS2's and Homebrew's GTK.
 #
-# Each job packages onIfy the way people install it (AppImage, installer,
-# .app), then smoke-tests the package: it must still be running 20 s after
-# launch, on a machine without that GTK installed where possible. A
-# screenshot of that run is uploaded next to the package. Uploads expire
+# Each job packages onIfy the way people install it (Flatpak, installer,
+# .app). Windows and macOS then smoke-test the package: it must still be
+# running 20 s after launch, on a machine without that GTK installed where
+# possible. A screenshot of that run is uploaded next to the package. Uploads expire
 # after a week and may fail without failing the build: private repos share
 # a small storage quota.
 #
@@ -28,76 +29,35 @@ permissions:
 # release (release files don't count against that quota), and the release is
 # published once all three have passed.
 jobs:
-    linux:
-        name: Linux
+    flatpak:
+        name: Linux (Flatpak)
         permissions:
             contents: write
         runs-on: ubuntu-latest
         timeout-minutes: 60
-        container: archlinux:latest
+        container:
+            image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-49
+            options: --privileged
         steps:
-            - name: Install Rust and GTK
-              run: >-
-                  pacman -Syu --noconfirm --needed base-devel git rust gtk4 libadwaita libpulse
-                  librsvg adwaita-icon-theme file xorg-server-xvfb xorg-xauth imagemagick mesa github-cli
-
             - uses: actions/checkout@v5
 
-            - uses: Swatinem/rust-cache@v2
-
-            # Private-repo runners have ~7 GB; inside the container an LTO,
-            # many-job build ran out of memory, so keep this one lighter.
-            - run: cargo build --release --locked
-              env:
-                  CARGO_BUILD_JOBS: "2"
-                  CARGO_PROFILE_RELEASE_LTO: "false"
-
-            - name: Package AppImage
-              run: packaging/linux/appimage.sh
-
-            - name: Smoke test
-              run: |
-                  xvfb-run -a -s "-screen 0 1280x820x24" sh -c '
-                      APPIMAGE_EXTRACT_AND_RUN=1 ./dist/onIfy-x86_64.AppImage &
-                      pid=$!
-                      sleep 20
-                      import -window root dist/screenshot-linux.png || true
-                      kill -0 $pid || { echo "onIfy quit on its own"; exit 1; }
-                      kill $pid
-                  '
+            - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+              with:
+                  manifest-path: packaging/flatpak/io.github.orqz.onIfy.yml
+                  bundle: onIfy-x86_64.flatpak
+                  cache-key: flatpak-builder-${{ hashFiles('Cargo.lock') }}
+                  upload-artifact: false
 
             - name: Attach to the release
               if: startsWith(github.ref, 'refs/tags/v')
               env:
                   GH_TOKEN: ${{ github.token }}
               run: |
+                  command -v gh >/dev/null || dnf install -y gh
                   gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
                       gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft \
                           --title "onIfy $GITHUB_REF_NAME" --notes-file packaging/release-notes.md || true
-                  gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber dist/onIfy-x86_64.AppImage
-
-            - uses: actions/upload-artifact@v4
-              continue-on-error: true
-              with:
-                  name: onIfy-linux-x86_64
-                  path: target/release/onify
-                  retention-days: 7
-
-            - uses: actions/upload-artifact@v4
-              continue-on-error: true
-              with:
-                  name: onIfy-linux-x86_64-AppImage
-                  path: dist/onIfy-x86_64.AppImage
-                  retention-days: 7
-
-            - uses: actions/upload-artifact@v4
-              continue-on-error: true
-              if: always()
-              with:
-                  name: screenshot-linux
-                  path: dist/screenshot-linux.png
-                  if-no-files-found: ignore
-                  retention-days: 3
+                  gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber onIfy-x86_64.flatpak
 
     windows:
         name: Windows
@@ -238,7 +198,7 @@ jobs:
 
     publish:
         name: Publish release
-        needs: [linux, windows, macos]
+        needs: [flatpak, windows, macos]
         if: startsWith(github.ref, 'refs/tags/v')
         runs-on: ubuntu-latest
         permissions:
