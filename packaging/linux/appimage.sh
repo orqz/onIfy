@@ -17,6 +17,10 @@ fetch() {
 }
 fetch linuxdeploy https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
 fetch linuxdeploy-plugin-gtk.sh https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh
+# GTK 4.20 builds its media and print backends in, so there's no gtk-4.0
+# modules folder to copy; the plugin fails without this guard.
+sed -i 's|^\(\s*\)copy_lib_tree "$gtk4_libdir" "$APPDIR/"$|\1[ -d "$gtk4_libdir" ] \&\& copy_lib_tree "$gtk4_libdir" "$APPDIR/"|' \
+    "$tools/linuxdeploy-plugin-gtk.sh"
 export PATH="$tools:$PATH"
 # No FUSE in containers; the tools unpack themselves instead.
 export APPIMAGE_EXTRACT_AND_RUN=1

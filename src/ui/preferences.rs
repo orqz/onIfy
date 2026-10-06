@@ -59,10 +59,10 @@ fn look_group() -> adw::PreferencesGroup {
     });
     group.add(&background);
 
-    let styles = gtk::StringList::new(&["Vinyl (experimental)", "Liquid glass"]);
+    let styles = gtk::StringList::new(&["Vinyl", "Liquid glass"]);
     let style = adw::ComboRow::builder()
-        .title("Style")
-        .subtitle("Vinyl drops the glass panels and spins the record while music plays")
+        .title("Theme")
+        .subtitle("Vinyl spins a record while music plays; Liquid glass floats frosted panels")
         .model(&styles)
         .selected(if ctx().settings.borrow().style == "glass" { 1 } else { 0 })
         .build();

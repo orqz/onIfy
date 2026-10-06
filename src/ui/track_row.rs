@@ -34,6 +34,8 @@ pub struct Parts {
     /// column; playlists show the selected song's after its artists, so their
     /// columns never shift.
     plays_column: bool,
+    /// Album pages keep the column on every row, under its heading.
+    plays_always: bool,
     number: gtk::Label,
     cover: Option<Cover>,
     title: gtk::Label,
@@ -235,11 +237,7 @@ impl TrackRow {
         columns.append(&album);
         row.append(&columns);
 
-        // Fixed width (up to "9,999,999,999") so columns line up row to row.
-        let plays = gtk::Label::builder().xalign(1.0).width_chars(13).visible(false).build();
-        plays.add_css_class("numeric");
-        plays.add_css_class("track-plays");
-        dim(&plays);
+        let plays = plays_label();
         row.append(&plays);
 
         let duration = duration_label();
@@ -253,6 +251,7 @@ impl TrackRow {
         let _ = row.imp().parts.set(Parts {
             lead,
             plays_column: mode != RowMode::Playlist,
+            plays_always: mode == RowMode::Album,
             number,
             cover,
             title,
@@ -351,8 +350,8 @@ impl TrackRow {
     fn show_plays(&self, plays: u64) {
         let parts = self.imp().parts.get().unwrap();
         let known = plays > 0;
-        parts.plays.set_visible(parts.plays_column && known);
-        parts.plays.set_label(&group_digits(plays));
+        parts.plays.set_visible(parts.plays_column && (known || parts.plays_always));
+        parts.plays.set_label(&if known { group_digits(plays) } else { String::new() });
         parts.inline_plays.set_visible(!parts.plays_column && known);
         parts.inline_plays.set_label(&format!("  ·  {} plays", group_digits(plays)));
     }
@@ -457,6 +456,15 @@ pub fn set_album_column(shown: bool) {
     });
 }
 
+/// Fixed width (up to "9,999,999,999") so columns line up row to row.
+fn plays_label() -> gtk::Label {
+    let plays = gtk::Label::builder().xalign(1.0).width_chars(13).visible(false).build();
+    plays.add_css_class("numeric");
+    plays.add_css_class("track-plays");
+    dim(&plays);
+    plays
+}
+
 fn duration_label() -> gtk::Label {
     let duration = gtk::Label::builder().width_chars(6).xalign(1.0).build();
     duration.add_css_class("numeric");
@@ -492,6 +500,18 @@ pub fn column_header(mode: RowMode) -> gtk::Box {
     }
     let columns = gtk::Box::builder().homogeneous(true).spacing(24).hexpand(true).build();
     let title = caption("Title", 0.0);
+    let plays = (mode == RowMode::Album).then(|| {
+        // As wide as the rows' play counts, sized the same way as Time below.
+        let slot = gtk::Stack::new();
+        let sizer = plays_label();
+        sizer.set_visible(true);
+        slot.add_child(&sizer);
+        let heading = caption("Plays", 1.0);
+        heading.set_margin_end(24);
+        slot.add_child(&heading);
+        slot.set_visible_child(&heading);
+        slot
+    });
     columns.append(&title);
     if mode == RowMode::Playlist {
         let heading = caption("Album", 0.0);
@@ -499,6 +519,9 @@ pub fn column_header(mode: RowMode) -> gtk::Box {
         columns.append(&heading);
     }
     header.append(&columns);
+    if let Some(plays) = &plays {
+        header.append(plays);
+    }
     // As wide as a row's duration: same label, same font, never shown. (The
     // caption's own smaller font made it narrower, shifting the Album column.)
     let time = gtk::Stack::new();

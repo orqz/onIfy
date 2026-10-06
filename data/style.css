@@ -428,22 +428,19 @@ list.tracks > row:selected .track-row {
   font-size: 13px;
 }
 
-/* Play counts show for the selected song only. */
+/* Play counts: a column on album and artist pages (and search, once a song
+   is clicked). */
 .track-plays {
   font-size: 13px;
   margin-right: 24px;
-  opacity: 0;
-  transition: opacity 150ms ease-out;
 }
 
-/* Playlists put the selected song's count after its artists instead. */
+/* Playlists show only the selected song's count, after its artists. */
 .track-plays-inline {
   opacity: 0;
   transition: opacity 150ms ease-out;
 }
 
-listview.tracks > row:selected .track-plays,
-list.tracks > row:selected .track-plays,
 listview.tracks > row:selected .track-plays-inline,
 list.tracks > row:selected .track-plays-inline {
   opacity: 1;

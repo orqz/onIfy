@@ -24,8 +24,14 @@ sed -e "s/@VERSION@/$version/g" -e "s/@MINOS@/$minos/g" packaging/macos/Info.pli
 # paths onIfy fills in at startup (use_bundled_gtk in main.rs).
 pixbuf="$contents/Resources/lib/gdk-pixbuf-2.0/2.10.0"
 mkdir -p "$pixbuf/loaders"
-find "$brew/lib/gdk-pixbuf-2.0/2.10.0/loaders" -name '*.so' -exec cp -L {} "$pixbuf/loaders/" \;
-gdk-pixbuf-query-loaders "$brew"/lib/gdk-pixbuf-2.0/2.10.0/loaders/*.so 2>/dev/null \
+find "$brew/lib/gdk-pixbuf-2.0/2.10.0/loaders" \( -name '*.so' -o -name '*.dylib' \) -exec cp -L {} "$pixbuf/loaders/" \;
+# Loaders keep their Homebrew path as their own name (librsvg's SVG one
+# does); give each its place in the app instead.
+for loader in "$pixbuf"/loaders/*; do
+    chmod +w "$loader"
+    install_name_tool -id "@executable_path/../Resources/lib/gdk-pixbuf-2.0/2.10.0/loaders/$(basename "$loader")" "$loader"
+done
+gdk-pixbuf-query-loaders "$brew"/lib/gdk-pixbuf-2.0/2.10.0/loaders/* 2>/dev/null \
     | sed -E 's|^"[^"]*/loaders/([^"/]+)"|"@LOADERS@/\1"|' > "$pixbuf/loaders.cache.in" || true
 
 # Homebrew dylibs, copied in and relinked to load from inside the app.
@@ -33,7 +39,7 @@ bundle() {
     dylibbundler -b -x "$1" -d "$contents/Frameworks" -p @executable_path/../Frameworks/ -s "$brew/lib" "$2"
 }
 bundle "$contents/MacOS/onify" -od
-for loader in "$pixbuf"/loaders/*.so; do
+for loader in "$pixbuf"/loaders/*; do
     if [ -e "$loader" ]; then
         bundle "$loader" -of
     fi
@@ -47,7 +53,8 @@ cp "$brew/share/icons/hicolor/index.theme" "$contents/Resources/share/icons/hico
 
 # Nothing may still point into Homebrew, or the app only works on this Mac.
 leaks=$(find "$contents" -type f \( -name '*.dylib' -o -name '*.so' -o -path '*/MacOS/*' \) \
-    -exec otool -L {} \; | grep -E "^[[:space:]]+($brew|/usr/local/(opt|Cellar))" || true)
+    -exec otool -L {} \; | grep -E "^[^[:space:]]|^[[:space:]]+($brew|/usr/local/(opt|Cellar))" \
+    | grep -B1 -E "^[[:space:]]" | grep -v '^--$' || true)
 if [ -n "$leaks" ]; then
     echo "Still linked to Homebrew:" >&2
     echo "$leaks" >&2
