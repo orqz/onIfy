@@ -1,0 +1,27 @@
+name: Feature Request
+description: An idea for something onIfy should do
+labels: [enhancement]
+title: "[Feature] <title>"
+
+body:
+    - type: textarea
+      id: feature
+      attributes:
+          label: What you'd like
+          description: Describe the feature and what you'd use it for
+      validations:
+          required: true
+
+    - type: textarea
+      id: context
+      attributes:
+          label: Anything else
+          description: Screenshots, mockups, how other apps do it…
+
+    - type: checkboxes
+      id: checks
+      attributes:
+          label: Before you send it
+          options:
+              - label: I searched the existing issues and this hasn't been suggested yet
+                required: true

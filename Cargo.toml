@@ -4,6 +4,7 @@ version = "0.1.1"
 edition = "2024"
 description = "A smooth, lightweight native Spotify client"
 license = "MIT"
+repository = "https://github.com/orqz/onIfy"
 
 [dependencies]
 gtk = { package = "gtk4", version = "0.11", features = ["v4_20"] }

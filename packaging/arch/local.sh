@@ -1,7 +1,7 @@
 #!/bin/sh
-# Builds and installs the onIfy package from this clone, the way the AUR
-# would from GitHub. For while the repo is private (makepkg can't fetch it
-# then). Update with: git pull && packaging/arch/local.sh
+# Builds and installs the onIfy package from this clone instead of GitHub,
+# e.g. to try local changes as a real package. Update with:
+# git pull && packaging/arch/local.sh
 set -eu
 
 repo=$(cd "$(dirname "$0")/../.." && pwd)

@@ -1,0 +1,91 @@
+name: Bug Report
+description: Something in onIfy doesn't work the way it should
+labels: [bug]
+title: "[Bug] <title>"
+
+body:
+    - type: markdown
+      attributes:
+          value: |
+              Thanks for taking the time to report this! Please check that it hasn't been reported already.
+
+    - type: input
+      id: version
+      attributes:
+          label: onIfy version
+          description: Preferences → Updates shows it
+          placeholder: "0.1.1"
+      validations:
+          required: true
+
+    - type: dropdown
+      id: os
+      attributes:
+          label: Operating system
+          options:
+              - Windows
+              - macOS
+              - Linux
+      validations:
+          required: true
+
+    - type: input
+      id: os-details
+      attributes:
+          label: System details
+          description: Version of your system, and on Linux your distro and desktop (GNOME, KDE, Hyprland…)
+          placeholder: "Windows 11 24H2 / macOS 15.4 / Arch, Hyprland"
+      validations:
+          required: true
+
+    - type: dropdown
+      id: install
+      attributes:
+          label: How did you install onIfy?
+          options:
+              - Windows installer
+              - macOS app
+              - Flatpak
+              - AppImage
+              - Arch package
+              - Built from source
+      validations:
+          required: true
+
+    - type: textarea
+      id: what-happened
+      attributes:
+          label: What happens
+          description: What goes wrong, and what you expected instead
+      validations:
+          required: true
+
+    - type: textarea
+      id: steps
+      attributes:
+          label: How to make it happen
+          description: The steps that lead to it, as exactly as you can
+          placeholder: |
+              1. Open a playlist
+              2. Click a song
+              3. …
+      validations:
+          required: true
+
+    - type: textarea
+      id: logs
+      attributes:
+          label: Logs
+          description: |
+              Start onIfy from a terminal with `RUST_LOG=onify=debug onify` and paste what it prints around the problem.
+          render: shell
+
+    - type: checkboxes
+      id: checks
+      attributes:
+          label: Before you send it
+          options:
+              - label: I searched the existing issues and this isn't one of them
+                required: true
+              - label: I'm on the latest version of onIfy
+                required: true
