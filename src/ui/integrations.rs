@@ -1,35 +1,23 @@
-//! Everything outside the window that follows playback: system media controls
-//! (MPRIS on Linux, SMTC on Windows, Now Playing on macOS), Discord Rich
-//! Presence and Last.fm.
+//! The system's media controls follow playback: MPRIS on Linux, SMTC on
+//! Windows, Now Playing on macOS. (Discord and Last.fm hear of plays through
+//! Spotify's own connections, so onIfy needs nothing for them.)
 
-use std::cell::RefCell;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
+#[cfg(target_os = "linux")]
 use gtk::glib;
 
-use super::ctx;
-use crate::api::{id_of, join_names};
-use crate::discord::{Discord, Presence};
-use crate::lastfm::{self, PlayCounter, Song};
-use crate::rt;
+#[cfg(target_os = "linux")]
+use crate::api::id_of;
 use crate::spotify::NowPlaying;
-
-thread_local! {
-    static DISCORD: RefCell<Option<Discord>> = const { RefCell::new(None) };
-    static SCROBBLE: RefCell<PlayCounter> = RefCell::default();
-    static SCROBBLE_TIMER: RefCell<Option<glib::SourceId>> = const { RefCell::new(None) };
-}
+#[cfg(not(target_os = "linux"))]
+use super::ctx;
 
 pub fn start(window: &gtk::Window) {
-    let client_id = ctx().settings.borrow().discord_id();
-    DISCORD.with_borrow_mut(|d| *d = Some(Discord::start(client_id)));
-
     #[cfg(target_os = "linux")]
     {
         let _ = window;
         glib::spawn_future_local(async {
             if let Some(player) = crate::mpris::start().await {
-                ctx().mpris.replace(Some(player));
+                super::ctx().mpris.replace(Some(player));
             }
         });
     }
@@ -37,51 +25,9 @@ pub fn start(window: &gtk::Window) {
     crate::media_controls::start(window);
 }
 
-/// Call after the Discord settings change.
-pub fn discord_settings_changed() {
-    let client_id = ctx().settings.borrow().discord_id();
-    DISCORD.with_borrow(|d| {
-        if let Some(d) = d {
-            d.set_client_id(client_id);
-        }
-    });
-    update_discord();
-}
-
+#[cfg(target_os = "linux")]
 fn is_local(uri: &str) -> bool {
     uri.starts_with("spotify:local:")
-}
-
-fn update_discord() {
-    let ctx = ctx();
-    let presence = ctx.now.borrow().as_ref().filter(|_| ctx.bar.is_playing()).map(|now| Presence {
-        title: now.name.clone(),
-        artist: join_names(&now.artists),
-        album: now.album.clone(),
-        cover: now.cover(300).map(str::to_owned),
-        track_url: if is_local(&now.uri) {
-            String::new()
-        } else {
-            format!("https://open.spotify.com/track/{}", id_of(&now.uri))
-        },
-        artist_url: now
-            .artists
-            .first()
-            .filter(|a| a.uri.starts_with("spotify:artist:"))
-            .map(|a| format!("https://open.spotify.com/artist/{}", id_of(&a.uri))),
-        duration_ms: now.duration_ms,
-        position_ms: ctx.bar.position_ms(),
-        playing: true,
-    });
-    DISCORD.with_borrow(|d| {
-        if let Some(d) = d {
-            d.set(presence);
-        }
-    });
-}
-
-fn unix_now() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()
 }
 
 pub fn track_changed(now: &NowPlaying) {
@@ -89,31 +35,6 @@ pub fn track_changed(now: &NowPlaying) {
     mpris_track(now);
     #[cfg(not(target_os = "linux"))]
     crate::media_controls::set_track(now);
-
-    let ctx = ctx();
-    let settings = ctx.settings.borrow();
-    // Spotify scrobbles its own songs; doing it here too would count them twice.
-    let scrobble = settings.lastfm.is_connected() && is_local(&now.uri);
-    let song = Song {
-        artist: now.artists.first().map(|a| a.name.clone()).unwrap_or_default(),
-        title: now.name.clone(),
-        album: now.album.clone(),
-        duration_ms: now.duration_ms,
-        started: unix_now(),
-    };
-    SCROBBLE.with_borrow_mut(|counter| {
-        if scrobble && !song.artist.is_empty() {
-            counter.start(song.clone());
-            if ctx.bar.is_playing() {
-                counter.resume();
-            }
-            rt::handle().spawn(lastfm::now_playing(settings.lastfm.clone(), song));
-        } else {
-            *counter = PlayCounter::default();
-        }
-    });
-    drop(settings);
-    update_discord();
 }
 
 pub fn playing(position_ms: u32) {
@@ -121,21 +42,6 @@ pub fn playing(position_ms: u32) {
     mpris_status(true, position_ms);
     #[cfg(not(target_os = "linux"))]
     crate::media_controls::set_playing(true, position_ms);
-
-    update_discord();
-    SCROBBLE.with_borrow_mut(PlayCounter::resume);
-    // Check every few seconds whether the song has earned its scrobble.
-    SCROBBLE_TIMER.with_borrow_mut(|timer| {
-        if timer.is_none() {
-            *timer = Some(glib::timeout_add_seconds_local(5, || {
-                if let Some(song) = SCROBBLE.with_borrow_mut(PlayCounter::due) {
-                    let account = ctx().settings.borrow().lastfm.clone();
-                    rt::handle().spawn(lastfm::scrobble(account, song));
-                }
-                glib::ControlFlow::Continue
-            }));
-        }
-    });
 }
 
 pub fn paused(position_ms: u32) {
@@ -143,14 +49,6 @@ pub fn paused(position_ms: u32) {
     mpris_status(false, position_ms);
     #[cfg(not(target_os = "linux"))]
     crate::media_controls::set_playing(false, position_ms);
-
-    update_discord();
-    SCROBBLE.with_borrow_mut(PlayCounter::pause);
-    SCROBBLE_TIMER.with_borrow_mut(|timer| {
-        if let Some(id) = timer.take() {
-            id.remove();
-        }
-    });
 }
 
 pub fn seeked(position_ms: u32) {
@@ -165,10 +63,6 @@ pub fn seeked(position_ms: u32) {
     }
     #[cfg(not(target_os = "linux"))]
     crate::media_controls::set_playing(ctx().bar.is_playing(), position_ms);
-
-    // Discord's progress bar is anchored to a start time; move it.
-    let discord_delay = Duration::from_millis(300);
-    glib::timeout_add_local_once(discord_delay, update_discord);
 }
 
 #[cfg(target_os = "linux")]

@@ -24,7 +24,6 @@ log = "0.4"
 env_logger = { version = "0.11", default-features = false, features = ["auto-color", "humantime"] }
 # Local files: same decoder librespot uses, plus MP4/AAC so .mp4 files play too.
 symphonia = { version = "0.5", default-features = false, features = ["mp3", "flac", "isomp4", "aac"] }
-md5 = "0.8"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"

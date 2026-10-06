@@ -6,9 +6,7 @@
 mod api;
 mod audio;
 mod covers;
-mod discord;
 mod images;
-mod lastfm;
 mod local;
 mod memory;
 #[cfg(not(target_os = "linux"))]
