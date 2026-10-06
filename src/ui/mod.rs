@@ -1037,9 +1037,9 @@ fn handle_event(event: Event) {
         }
         Event::Unavailable => {
             // librespot skips on to the next song when one won't load. Several
-            // in a row means Spotify is refusing song keys, which it does for a
-            // while after too many requests; skipping through the queue asks
-            // for a key per song and keeps the refusal going, so stop instead.
+            // in a row means this session stopped getting song keys from
+            // Spotify (it happens after a while); a fresh session gets them at
+            // once, so stop skipping through the queue and reconnect.
             let now = std::time::Instant::now();
             let recent = ctx.last_unavailable.get().is_some_and(|t| now.duration_since(t) < Duration::from_secs(10));
             let streak = if recent { ctx.unavailable_streak.get() + 1 } else { 1 };
@@ -1049,7 +1049,9 @@ fn handle_event(event: Event) {
                 1 => toast("This song isn't available"),
                 3 => {
                     ctx.with_engine(|e| e.pause());
-                    toast("Spotify isn't letting songs play right now. Try again in a minute");
+                    ctx.engine_stale.set(true);
+                    restart_if_stale();
+                    toast("Spotify stopped sending songs, so onIfy reconnected. Press play to continue");
                 }
                 _ => {}
             }
