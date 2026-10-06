@@ -6,8 +6,8 @@
   --accent-bg-color: #f2f2f2;
   --accent-fg-color: #101010;
   --accent-color: #f2f2f2;
-  /* The sidebar logo: its own green until a cover recolours it. */
-  --logo-color: #00da5a;
+  /* The sidebar logo: black until a cover recolours it. */
+  --logo-color: #000000;
 
   --window-bg-color: #0b0b10;
   --window-fg-color: #ffffff;
