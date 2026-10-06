@@ -36,6 +36,8 @@ use pages::{HomePage, Loaded, SearchPage};
 use player_bar::PlayerBar;
 
 pub const APP_ID: &str = "io.github.orqz.onIfy";
+const DISCORD_SERVER: &str = "https://discord.gg/mrevdwV434";
+const REPO: &str = "https://github.com/orqz/onIfy";
 
 #[derive(Clone)]
 enum Route {
@@ -503,6 +505,7 @@ fn build_sidebar() -> (adw::NavigationPage, gtk::ListBox, Glass) {
     let menu = gio::Menu::new();
     let main_section = gio::Menu::new();
     main_section.append(Some("Preferences"), Some("app.preferences"));
+    main_section.append(Some("Join the Discord Server"), Some("app.discord"));
     main_section.append(Some("About onIfy"), Some("app.about"));
     menu.append_section(None, &main_section);
     let session_section = gio::Menu::new();
@@ -1103,8 +1106,14 @@ fn install_actions(app: &adw::Application) {
             .comments("A native Spotify client that stays smooth and light.")
             .developer_name("orqz")
             .license_type(gtk::License::MitX11)
+            .website(REPO)
+            .issue_url(format!("{REPO}/issues"))
             .build();
+        about.add_link("Discord Server", DISCORD_SERVER);
         about.present(Some(&ctx().window));
+    });
+    action("discord", || {
+        gtk::UriLauncher::new(DISCORD_SERVER).launch(Some(&ctx().window), gio::Cancellable::NONE, |_| {});
     });
 
     let with_string = |name: &str, f: fn(&str)| {
