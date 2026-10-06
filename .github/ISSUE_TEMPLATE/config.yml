@@ -1,1 +1,5 @@
 blank_issues_enabled: false
+contact_links:
+    - name: Discord Server
+      url: https://discord.gg/mrevdwV434
+      about: Questions and help, ask in our Discord server

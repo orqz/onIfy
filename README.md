@@ -27,6 +27,10 @@ Grab the [latest release](https://github.com/orqz/onIfy/releases/latest):
 - macOS (Apple Silicon, 15+): `onIfy-macos-arm64.dmg`. It isn't notarized, so right click → Open the first time
 - Linux: Flatpak coming soon, use the AppImage until then (needs an up to date distro)
 
+## Join our Discord Server
+
+https://discord.gg/mrevdwV434
+
 ## Building from Source
 
 You need Rust, GTK 4.20+ and libadwaita 1.8+ (and libpulse on Linux)
