@@ -40,8 +40,18 @@ mod imp {
             let widget = self.obj();
             let (w, h) = (widget.width() as f32, widget.height() as f32);
             let bounds = graphene::Rect::new(0.0, 0.0, w, h);
-            // Black until a cover arrives (nothing played yet, or covers off).
-            snapshot.append_color(&gdk::RGBA::new(0.0, 0.0, 0.0, 1.0), &bounds);
+            // Until a cover arrives (nothing played yet, or covers off): dark
+            // grey in the top-left corner fading to black.
+            snapshot.append_linear_gradient(
+                &bounds,
+                &graphene::Point::new(0.0, 0.0),
+                &graphene::Point::new(w, h),
+                &[
+                    gsk::ColorStop::new(0.0, gdk::RGBA::new(0.19, 0.19, 0.21, 1.0)),
+                    gsk::ColorStop::new(0.55, gdk::RGBA::new(0.07, 0.07, 0.08, 1.0)),
+                    gsk::ColorStop::new(1.0, gdk::RGBA::new(0.015, 0.015, 0.02, 1.0)),
+                ],
+            );
 
             let draw = |texture: &gdk::Texture, alpha: f64| {
                 if alpha <= 0.0 {
@@ -65,7 +75,14 @@ mod imp {
             }
 
             // Deepen the colour, keep the top airy and the bottom grounded.
-            let black = |a: f32| gdk::RGBA::new(0.02, 0.02, 0.04, a);
+            // Over the plain gradient there's nothing to deepen, so this fades
+            // in with the first cover.
+            let cover = match (self.previous.borrow().is_some(), self.current.borrow().is_some()) {
+                (true, _) => 1.0,
+                (false, true) => mix as f32,
+                (false, false) => 0.0,
+            };
+            let black = |a: f32| gdk::RGBA::new(0.02, 0.02, 0.04, a * cover);
             let (top, middle, bottom, edge) = match self.mood.get() {
                 super::Mood::Bright => (0.08, 0.18, 0.44, 0.26),
                 super::Mood::Normal => (0.20, 0.34, 0.58, 0.38),
