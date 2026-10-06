@@ -85,7 +85,10 @@ glib::wrapper! {
 }
 
 /// How long the pointer rests on a song before it's preloaded.
-const PRELOAD_AFTER: std::time::Duration = std::time::Duration::from_millis(300);
+const PRELOAD_AFTER: std::time::Duration = std::time::Duration::from_millis(600);
+/// At most one hover preload this often: each one asks Spotify for the song's
+/// key, and too many key requests get refused for a while.
+const PRELOAD_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
 
 thread_local! {
     /// Album column labels and headings, hidden when the window is compact.
@@ -94,6 +97,7 @@ thread_local! {
     static ROWS: RefCell<Vec<glib::WeakRef<TrackRow>>> = const { RefCell::new(Vec::new()) };
     static HOVER: RefCell<Option<glib::SourceId>> = const { RefCell::new(None) };
     static PRELOADED: RefCell<String> = const { RefCell::new(String::new()) };
+    static LAST_PRELOAD: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
     static NOW_PLAYING: RefCell<String> = const { RefCell::new(String::new()) };
     /// Play counts fetched for selected songs, by URI.
     static PLAYS: RefCell<std::collections::HashMap<String, u64>> = RefCell::default();
@@ -305,7 +309,9 @@ impl TrackRow {
                     let playing = NOW_PLAYING.with_borrow(|now| *now == track.uri);
                     let fresh = PRELOADED.with_borrow(|last| *last != track.uri);
                     let wanted = super::ctx().settings.borrow().hover_preload;
-                    if track.playable && !playing && fresh && wanted {
+                    let rested = LAST_PRELOAD.get().is_none_or(|t| t.elapsed() >= PRELOAD_EVERY);
+                    if track.playable && !playing && fresh && wanted && rested {
+                        LAST_PRELOAD.set(Some(std::time::Instant::now()));
                         PRELOADED.with_borrow_mut(|last| *last = track.uri.clone());
                         super::ctx().with_engine(|e| e.preload(&track.uri));
                     }

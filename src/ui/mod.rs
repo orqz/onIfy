@@ -95,6 +95,8 @@ pub struct Ctx {
     /// the next pause so it picks them up.
     engine_stale: Cell<bool>,
     last_unavailable: Cell<Option<std::time::Instant>>,
+    /// Songs in a row that wouldn't load (see Event::Unavailable).
+    unavailable_streak: Cell<u32>,
     #[cfg(target_os = "linux")]
     mpris: RefCell<Option<Rc<mpris_server::Player>>>,
     now: RefCell<Option<NowPlaying>>,
@@ -314,6 +316,7 @@ pub fn activate(app: &adw::Application) {
         save_pending: Cell::new(false),
         engine_stale: Cell::new(false),
         last_unavailable: Cell::default(),
+        unavailable_streak: Cell::new(0),
         #[cfg(target_os = "linux")]
         mpris: RefCell::default(),
         now: RefCell::default(),
@@ -1033,12 +1036,23 @@ fn handle_event(event: Event) {
             integrations::volume(volume);
         }
         Event::Unavailable => {
-            // librespot skips through every song it can't play; say so once.
+            // librespot skips on to the next song when one won't load. Several
+            // in a row means Spotify is refusing song keys, which it does for a
+            // while after too many requests; skipping through the queue asks
+            // for a key per song and keeps the refusal going, so stop instead.
             let now = std::time::Instant::now();
-            if ctx.last_unavailable.get().is_none_or(|t| now.duration_since(t) > Duration::from_secs(5)) {
-                toast("This song isn't available");
-            }
+            let recent = ctx.last_unavailable.get().is_some_and(|t| now.duration_since(t) < Duration::from_secs(10));
+            let streak = if recent { ctx.unavailable_streak.get() + 1 } else { 1 };
+            ctx.unavailable_streak.set(streak);
             ctx.last_unavailable.set(Some(now));
+            match streak {
+                1 => toast("This song isn't available"),
+                3 => {
+                    ctx.with_engine(|e| e.pause());
+                    toast("Spotify isn't letting songs play right now. Try again in a minute");
+                }
+                _ => {}
+            }
         }
         Event::Disconnected(generation) => {
             if generation == ctx.generation.get() {
