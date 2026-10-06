@@ -40,28 +40,8 @@ mod imp {
             let widget = self.obj();
             let (w, h) = (widget.width() as f32, widget.height() as f32);
             let bounds = graphene::Rect::new(0.0, 0.0, w, h);
-            snapshot.append_color(&gdk::RGBA::new(0.035, 0.035, 0.05, 1.0), &bounds);
-
-            // Nothing playing yet: a calm two-tone glow instead of a cover.
-            if self.current.borrow().is_none() {
-                for (x, y, r, color) in [
-                    (0.15, 0.1, 0.9, gdk::RGBA::new(0.32, 0.18, 0.62, 0.55)),
-                    (0.9, 0.85, 0.8, gdk::RGBA::new(0.05, 0.38, 0.45, 0.45)),
-                ] {
-                    snapshot.append_radial_gradient(
-                        &bounds,
-                        &graphene::Point::new(w * x, h * y),
-                        w.max(h) * r,
-                        w.max(h) * r,
-                        0.0,
-                        1.0,
-                        &[
-                            gsk::ColorStop::new(0.0, color),
-                            gsk::ColorStop::new(1.0, gdk::RGBA::new(color.red(), color.green(), color.blue(), 0.0)),
-                        ],
-                    );
-                }
-            }
+            // Black until a cover arrives (nothing played yet, or covers off).
+            snapshot.append_color(&gdk::RGBA::new(0.0, 0.0, 0.0, 1.0), &bounds);
 
             let draw = |texture: &gdk::Texture, alpha: f64| {
                 if alpha <= 0.0 {
