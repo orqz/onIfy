@@ -25,9 +25,10 @@ permissions:
 # after a week and may fail without failing the build: private repos share
 # a small storage quota.
 #
-# Releases: push a tag like v0.1.0. Each job attaches its package to a draft
-# release (release files don't count against that quota), and the release is
-# published once all three have passed.
+# Releases: push an annotated tag whose message is the changelog
+# (git tag -a vX.Y.Z --cleanup=verbatim -F notes.md). Each job attaches its
+# package to a draft release with those notes (release files don't count
+# against that quota), and it's published once all three have passed.
 jobs:
     flatpak:
         name: Linux (Flatpak)
@@ -56,7 +57,7 @@ jobs:
                   command -v gh >/dev/null || dnf install -y gh
                   gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
                       gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft \
-                          --title "onIfy $GITHUB_REF_NAME" --notes-file packaging/release-notes.md || true
+                          --title "${GITHUB_REF_NAME#v}" --notes-from-tag || true
                   gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber onIfy-x86_64.flatpak
 
     windows:
@@ -122,7 +123,7 @@ jobs:
               run: |
                   gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
                       gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft \
-                          --title "onIfy $GITHUB_REF_NAME" --notes-file packaging/release-notes.md || true
+                          --title "${GITHUB_REF_NAME#v}" --notes-from-tag || true
                   gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber dist/onIfy-setup-x86_64.exe
 
             - uses: actions/upload-artifact@v4
@@ -177,7 +178,7 @@ jobs:
               run: |
                   gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
                       gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft \
-                          --title "onIfy $GITHUB_REF_NAME" --notes-file packaging/release-notes.md || true
+                          --title "${GITHUB_REF_NAME#v}" --notes-from-tag || true
                   gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber dist/onIfy-macos-arm64.dmg
 
             - uses: actions/upload-artifact@v4
