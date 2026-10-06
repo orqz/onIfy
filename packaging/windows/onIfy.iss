@@ -26,6 +26,8 @@ UninstallDisplayIcon={app}\onify.ico
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+CloseApplications=force
+RestartApplications=no
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
@@ -41,3 +43,14 @@ Name: "{autodesktop}\onIfy"; Filename: "{app}\bin\onify.exe"; IconFilename: "{ap
 Filename: "{app}\bin\onify.exe"; Description: "{cm:LaunchProgram,onIfy}"; Flags: nowait postinstall skipifsilent
 ; onIfy's own updater runs this installer silently, then expects onIfy back.
 Filename: "{app}\bin\onify.exe"; Flags: nowait; Check: WizardSilent
+
+[Code]
+// A running onIfy keeps its files locked and stays open next to the new one
+// (Windows has no session bus to make it single-instance), so close it first.
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/f /im onify.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := '';
+end;
