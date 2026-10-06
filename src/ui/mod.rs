@@ -35,7 +35,7 @@ use cover::Cover;
 use pages::{HomePage, Loaded, SearchPage};
 use player_bar::PlayerBar;
 
-pub const APP_ID: &str = "dev.orqz.onIfy";
+pub const APP_ID: &str = "io.github.orqz.onIfy";
 
 #[derive(Clone)]
 enum Route {

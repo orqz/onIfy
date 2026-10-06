@@ -77,7 +77,7 @@ fn mpris_track(now: &NowPlaying) {
         metadata = metadata.url(format!("https://open.spotify.com/track/{}", id_of(&now.uri)));
     }
     let path_id: String = id_of(&now.uri).chars().filter(char::is_ascii_alphanumeric).collect();
-    if let Ok(id) = TrackId::try_from(format!("/dev/orqz/onIfy/track/t{path_id}")) {
+    if let Ok(id) = TrackId::try_from(format!("/io/github/orqz/onIfy/track/t{path_id}")) {
         metadata = metadata.trackid(id);
     }
     if let Some(cover) = now.cover(640) {

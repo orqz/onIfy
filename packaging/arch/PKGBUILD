@@ -32,7 +32,7 @@ build() {
 package() {
     cd "$pkgname"
     install -Dm755 target/release/onify "$pkgdir/usr/bin/onify"
-    install -Dm644 data/dev.orqz.onIfy.desktop "$pkgdir/usr/share/applications/dev.orqz.onIfy.desktop"
-    install -Dm644 data/icons/dev.orqz.onIfy.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/dev.orqz.onIfy.svg"
+    install -Dm644 data/io.github.orqz.onIfy.desktop "$pkgdir/usr/share/applications/io.github.orqz.onIfy.desktop"
+    install -Dm644 data/icons/io.github.orqz.onIfy.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.orqz.onIfy.svg"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <gresources>
-  <gresource prefix="/dev/orqz/onIfy">
+  <gresource prefix="/io/github/orqz/onIfy">
     <file compressed="true">style.css</file>
     <file preprocess="xml-stripblanks" alias="icons/scalable/actions/edit-clear-symbolic.svg">icons/edit-clear-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="icons/scalable/actions/edit-find-symbolic.svg">icons/edit-find-symbolic.svg</file>
@@ -27,6 +27,6 @@
     <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-open-menu-symbolic.svg">icons/onify-open-menu-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-playing-symbolic.svg">icons/onify-playing-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-system-search-symbolic.svg">icons/onify-system-search-symbolic.svg</file>
-    <file preprocess="xml-stripblanks" alias="icons/scalable/apps/dev.orqz.onIfy.svg">icons/dev.orqz.onIfy.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/apps/io.github.orqz.onIfy.svg">icons/io.github.orqz.onIfy.svg</file>
   </gresource>
 </gresources>

@@ -42,8 +42,8 @@ cp /usr/share/icons/hicolor/index.theme "$appdir/usr/share/icons/hicolor/" 2>/de
 
 linuxdeploy --appdir "$appdir" \
     --executable target/release/onify \
-    --desktop-file data/dev.orqz.onIfy.desktop \
-    --icon-file data/icons/dev.orqz.onIfy.svg \
+    --desktop-file data/io.github.orqz.onIfy.desktop \
+    --icon-file data/icons/io.github.orqz.onIfy.svg \
     --plugin gtk
 
 # The GTK plugin forces X11 (blurry under scaling on Wayland) and a plain

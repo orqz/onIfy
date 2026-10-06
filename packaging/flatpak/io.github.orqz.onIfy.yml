@@ -1,0 +1,39 @@
+id: io.github.orqz.onIfy
+runtime: org.gnome.Platform
+runtime-version: "49"
+sdk: org.gnome.Sdk
+sdk-extensions:
+    - org.freedesktop.Sdk.Extension.rust-stable
+command: onify
+finish-args:
+    - --share=network
+    - --share=ipc
+    - --socket=wayland
+    - --socket=fallback-x11
+    - --device=dri
+    - --socket=pulseaudio
+    # Local Files reads your music folder
+    - --filesystem=xdg-music:ro
+    # Media keys and now playing controls
+    - --own-name=org.mpris.MediaPlayer2.onify
+build-options:
+    append-path: /usr/lib/sdk/rust-stable/bin
+    env:
+        CARGO_HOME: /run/build/onify/cargo
+modules:
+    - name: onify
+      buildsystem: simple
+      build-commands:
+          - cargo --offline build --release --locked
+          - install -Dm755 target/release/onify -t /app/bin/
+          - install -Dm644 data/io.github.orqz.onIfy.desktop -t /app/share/applications/
+          - install -Dm644 data/icons/io.github.orqz.onIfy.svg -t /app/share/icons/hicolor/scalable/apps/
+          - install -Dm644 data/io.github.orqz.onIfy.metainfo.xml -t /app/share/metainfo/
+      sources:
+          - type: dir
+            path: ../..
+            skip:
+                - target
+                - dist
+                - .flatpak-builder
+          - cargo-sources.json

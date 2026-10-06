@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.orqz.onIfy</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>onIfy</name>
+  <summary>Lightweight Spotify client</summary>
+  <developer id="io.github.orqz">
+    <name>orqz</name>
+  </developer>
+  <description>
+    <p>A native Spotify client that opens in under a second and stays light on memory and CPU, with themes that take their colours from the song you play.</p>
+    <ul>
+      <li>Vinyl theme, the cover spins like a record and the app takes its colours from the song</li>
+      <li>Liquid glass theme</li>
+      <li>Play counts, synced lyrics and local files</li>
+      <li>Shows up as a Spotify Connect device</li>
+    </ul>
+    <p>Needs Spotify Premium. onIfy isn't affiliated with Spotify.</p>
+  </description>
+  <launchable type="desktop-id">io.github.orqz.onIfy.desktop</launchable>
+  <url type="homepage">https://github.com/orqz/onIfy</url>
+  <url type="bugtracker">https://github.com/orqz/onIfy/issues</url>
+  <url type="vcs-browser">https://github.com/orqz/onIfy</url>
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/orqz/onIfy/main/.github/assets/screenshot.png</image>
+      <caption>An album playing with the Vinyl theme</caption>
+    </screenshot>
+  </screenshots>
+  <content_rating type="oars-1.1"/>
+  <branding>
+    <color type="primary" scheme_preference="light">#7fe0a6</color>
+    <color type="primary" scheme_preference="dark">#0d3b22</color>
+  </branding>
+  <requires>
+    <display_length compare="ge">300</display_length>
+  </requires>
+  <recommends>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </recommends>
+  <releases>
+    <release version="0.1.1" date="2026-10-06">
+      <description>
+        <p>Update checks, an Arch package, and quitting no longer gets stuck behind open dialogs.</p>
+      </description>
+    </release>
+    <release version="0.1.0" date="2026-10-06"/>
+  </releases>
+</component>

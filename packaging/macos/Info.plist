@@ -11,7 +11,7 @@
 	<key>CFBundleIconFile</key>
 	<string>onify</string>
 	<key>CFBundleIdentifier</key>
-	<string>dev.orqz.onIfy</string>
+	<string>io.github.orqz.onIfy</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>

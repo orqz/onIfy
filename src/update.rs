@@ -1,6 +1,7 @@
 //! Updates from the GitHub releases.
 //!
 //! How a new version gets installed depends on how this one was:
+//! - a Flatpak: Flatpak updates it, so onIfy doesn't check at all;
 //! - a distro package (pacman/yay, anything under /usr): the package manager
 //!   updates it, so onIfy only says a new version is out;
 //! - an AppImage: the file is swapped for the new one, then onIfy restarts;
@@ -33,6 +34,7 @@ pub struct Release {
 /// How this copy of onIfy was installed (see the module docs).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Install {
+    Flatpak,
     Package,
     /// The AppImage to replace.
     File(PathBuf),
@@ -46,7 +48,7 @@ pub enum Install {
 impl Install {
     /// Whether onIfy can install the update itself.
     pub fn automatic(&self) -> bool {
-        !matches!(self, Install::Package | Install::Manual)
+        !matches!(self, Install::Flatpak | Install::Package | Install::Manual)
     }
 
     /// The release file this kind of install updates from.
@@ -55,7 +57,7 @@ impl Install {
             Install::File(_) => name.ends_with(".AppImage") && name.contains(std::env::consts::ARCH),
             Install::WindowsInstaller => name.ends_with(".exe"),
             Install::MacApp(_) => name.ends_with(".dmg"),
-            Install::Package | Install::Manual => false,
+            Install::Flatpak | Install::Package | Install::Manual => false,
         }
     }
 }
@@ -77,6 +79,9 @@ pub fn install() -> Install {
         return Install::Manual;
     }
     if cfg!(target_os = "linux") {
+        if Path::new("/.flatpak-info").exists() {
+            return Install::Flatpak;
+        }
         if let Some(appimage) = std::env::var_os("APPIMAGE") {
             return Install::File(appimage.into());
         }
@@ -192,7 +197,7 @@ pub async fn install_release(release: &Release, install: &Install) -> Result<(),
         Install::File(target) => replace_file(target, &data),
         Install::WindowsInstaller => run_installer(name, &data),
         Install::MacApp(bundle) => replace_app(bundle, &data),
-        Install::Package | Install::Manual => Err("onIfy can't update itself here".into()),
+        Install::Flatpak | Install::Package | Install::Manual => Err("onIfy can't update itself here".into()),
     }
 }
 

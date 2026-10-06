@@ -16,10 +16,10 @@ if [ ! -f "$bin" ]; then
 fi
 
 install -Dm755 "$bin" "$HOME/.local/bin/onify"
-install -Dm644 "$root/data/dev.orqz.onIfy.desktop" "$prefix/applications/dev.orqz.onIfy.desktop"
-install -Dm644 "$root/data/icons/dev.orqz.onIfy.svg" "$prefix/icons/hicolor/scalable/apps/dev.orqz.onIfy.svg"
+install -Dm644 "$root/data/io.github.orqz.onIfy.desktop" "$prefix/applications/io.github.orqz.onIfy.desktop"
+install -Dm644 "$root/data/icons/io.github.orqz.onIfy.svg" "$prefix/icons/hicolor/scalable/apps/io.github.orqz.onIfy.svg"
 # Absolute path, so the menu entry works even if ~/.local/bin isn't on PATH.
-sed -i "s|^Exec=onify|Exec=$HOME/.local/bin/onify|" "$prefix/applications/dev.orqz.onIfy.desktop"
+sed -i "s|^Exec=onify|Exec=$HOME/.local/bin/onify|" "$prefix/applications/io.github.orqz.onIfy.desktop"
 update-desktop-database -q "$prefix/applications" 2>/dev/null || true
 gtk-update-icon-cache -q -t "$prefix/icons/hicolor" 2>/dev/null || true
 echo "Installed onIfy to $HOME/.local/bin/onify"

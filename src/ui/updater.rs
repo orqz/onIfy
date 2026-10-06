@@ -18,7 +18,8 @@ thread_local! {
 /// Checks a little after startup and every 6 hours, while the setting is on.
 /// These checks are quiet: offline or no releases, nothing shows.
 pub fn start() {
-    if update::install() == Install::Manual && std::env::var_os("ONIFY_DEV").is_none() {
+    let install = update::install();
+    if install == Install::Flatpak || (install == Install::Manual && std::env::var_os("ONIFY_DEV").is_none()) {
         return;
     }
     glib::timeout_add_local_once(Duration::from_secs(15), || check(false));
