@@ -141,6 +141,31 @@ pub fn set_now_playing(uri: &str) {
     });
 }
 
+/// Artist names as markup, each linking to its page (local files' artists
+/// have none and stay plain). Pair with [`open_links`].
+pub fn artist_links(artists: &[crate::api::Named]) -> String {
+    artists
+        .iter()
+        .map(|a| {
+            let name = glib::markup_escape_text(&a.name);
+            if a.uri.is_empty() {
+                name.to_string()
+            } else {
+                format!("<a href=\"{}\">{name}</a>", glib::markup_escape_text(&a.uri))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Clicking a link in `label` opens that page in onIfy.
+pub fn open_links(label: &gtk::Label) {
+    label.connect_activate_link(|_, uri| {
+        super::open_uri(uri);
+        glib::Propagation::Stop
+    });
+}
+
 fn dim(label: &gtk::Label) -> &gtk::Label {
     label.add_css_class("dim-label");
     label
@@ -215,6 +240,7 @@ impl TrackRow {
         title_line.append(&explicit);
         let artists = ellipsized("track-artists");
         dim(&artists);
+        open_links(&artists);
         let inline_plays = gtk::Label::builder().visible(false).build();
         inline_plays.add_css_class("track-artists");
         inline_plays.add_css_class("track-plays-inline");
@@ -326,7 +352,7 @@ impl TrackRow {
             parts.number.set_label(&number.to_string());
             parts.title.set_label(&track.name);
             parts.explicit.set_visible(track.explicit);
-            parts.artists.set_label(&track.artist_names());
+            parts.artists.set_markup(&artist_links(&track.artists));
             parts.album.set_label(&track.album.name);
             parts.duration.set_label(&format_duration(track.duration_ms));
             if let Some(cover) = &parts.cover {

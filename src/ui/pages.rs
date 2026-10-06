@@ -287,6 +287,7 @@ fn hero(eyebrow: &str, title: &str, art: &impl IsA<gtk::Widget>) -> Hero {
     let subtitle = label("", &["meta"]);
     subtitle.set_wrap(true);
     subtitle.set_lines(2);
+    super::track_row::open_links(&subtitle);
     info.append(&subtitle);
     let actions = gtk::Box::builder().spacing(14).margin_top(18).build();
     info.append(&actions);
@@ -785,6 +786,7 @@ fn scan_local(loaded: &Rc<Loaded>) {
             title: String::new(),
             subtitle,
             images: Images::default(),
+            artists: Vec::new(),
         };
         set_header(&loaded, header);
         loaded.store.extend_from_slice(&objects(tracks));
@@ -880,7 +882,16 @@ pub fn tracks_page(kind: Kind, uri: &str, title: &str, images: &Images) -> adw::
             if !h.title.is_empty() {
                 t.set_label(&h.title);
             }
-            s.set_label(&h.subtitle);
+            // An album's artists link to their pages; the rest is plain text.
+            let rest = h.subtitle.strip_prefix(&crate::api::join_names(&h.artists));
+            match rest.filter(|_| !h.artists.is_empty()) {
+                Some(rest) => s.set_markup(&format!(
+                    "{}{}",
+                    super::track_row::artist_links(&h.artists),
+                    glib::markup_escape_text(rest)
+                )),
+                None => s.set_label(&h.subtitle),
+            }
             if let (Some(art), Some(url)) = (art.upgrade(), h.images.pick(480)) {
                 set_art_url(&art, url);
             }

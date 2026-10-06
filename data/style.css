@@ -635,13 +635,18 @@ glass.sidebar-glass {
 }
 
 .now-title link,
-.now-artists link {
+.now-artists link,
+.track-artists link,
+.meta link {
   color: inherit;
   text-decoration: none;
 }
 
 .now-title link:hover,
-.now-artists link:hover {
+.now-artists link:hover,
+.track-artists link:hover,
+.meta link:hover {
+  color: #ffffff;
   text-decoration: underline;
 }
 

@@ -303,6 +303,8 @@ pub struct Header {
     pub title: String,
     pub subtitle: String,
     pub images: Images,
+    /// An album's artists, which start its subtitle and link to their pages.
+    pub artists: Vec<Named>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -688,6 +690,7 @@ impl Api {
                     title: str_of(&p["name"]),
                     subtitle: subtitle.join(" • "),
                     images: Images::parse(&p["images"]["items"][0]["sources"]),
+                    artists: Vec::new(),
                 };
                 (total, header, None)
             }
@@ -695,7 +698,8 @@ impl Api {
                 let a = &first["albumUnion"];
                 let total = a["tracksV2"]["totalCount"].as_u64().unwrap_or(0) as usize;
                 let year: String = str_of(&a["date"]["isoString"]).chars().take(4).collect();
-                let subtitle = [join_names(&artists(&a["artists"])), year, songs(total)];
+                let album_artists = artists(&a["artists"]);
+                let subtitle = [join_names(&album_artists), year, songs(total)];
                 let named = Named {
                     name: str_of(&a["name"]),
                     uri: str_of(&a["uri"]),
@@ -705,6 +709,7 @@ impl Api {
                     title: named.name.clone(),
                     subtitle: subtitle.into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" • "),
                     images: images.clone(),
+                    artists: album_artists,
                 };
                 (total, header, Some((named, images)))
             }
@@ -714,6 +719,7 @@ impl Api {
                     title: "Liked Songs".into(),
                     subtitle: songs(total),
                     images: Images::default(),
+                    artists: Vec::new(),
                 };
                 (total, header, None)
             }

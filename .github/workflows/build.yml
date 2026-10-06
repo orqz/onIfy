@@ -20,7 +20,9 @@ permissions:
 # Each job packages onIfy the way people install it (AppImage, installer,
 # .app), then smoke-tests the package: it must still be running 20 s after
 # launch, on a machine without that GTK installed where possible. A
-# screenshot of that run is uploaded next to the package.
+# screenshot of that run is uploaded next to the package. Uploads expire
+# after a week and may fail without failing the build: private repos share
+# a small storage quota.
 jobs:
     linux:
         name: Linux
@@ -59,21 +61,27 @@ jobs:
                   '
 
             - uses: actions/upload-artifact@v4
+              continue-on-error: true
               with:
                   name: onIfy-linux-x86_64
                   path: target/release/onify
+                  retention-days: 7
 
             - uses: actions/upload-artifact@v4
+              continue-on-error: true
               with:
                   name: onIfy-linux-x86_64-AppImage
                   path: dist/onIfy-x86_64.AppImage
+                  retention-days: 7
 
             - uses: actions/upload-artifact@v4
+              continue-on-error: true
               if: always()
               with:
                   name: screenshot-linux
                   path: dist/screenshot-linux.png
                   if-no-files-found: ignore
+                  retention-days: 3
 
     windows:
         name: Windows
@@ -129,16 +137,20 @@ jobs:
                   Stop-Process -Id $app.Id
 
             - uses: actions/upload-artifact@v4
+              continue-on-error: true
               with:
                   name: onIfy-windows-x86_64-setup
                   path: dist/onIfy-setup-x86_64.exe
+                  retention-days: 7
 
             - uses: actions/upload-artifact@v4
+              continue-on-error: true
               if: always()
               with:
                   name: screenshot-windows
                   path: dist/screenshot-windows.png
                   if-no-files-found: ignore
+                  retention-days: 3
 
     macos:
         name: macOS
@@ -168,13 +180,17 @@ jobs:
                   kill $pid
 
             - uses: actions/upload-artifact@v4
+              continue-on-error: true
               with:
                   name: onIfy-macos-arm64
                   path: dist/onIfy-macos-arm64.dmg
+                  retention-days: 7
 
             - uses: actions/upload-artifact@v4
+              continue-on-error: true
               if: always()
               with:
                   name: screenshot-macos
                   path: dist/screenshot-macos.png
                   if-no-files-found: ignore
+                  retention-days: 3
