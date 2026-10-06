@@ -52,6 +52,20 @@ pub fn cache_dir() -> PathBuf {
     gtk::glib::user_cache_dir().join("onify")
 }
 
+/// The config folder holds the Spotify login (a reusable credential) and the
+/// cache holds the library: both are for this account only, whatever the
+/// umask made them. Windows and macOS already keep these folders per user.
+#[cfg(unix)]
+pub fn lock_down_dirs() {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    for dir in [config_dir(), cache_dir()] {
+        let _ = std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir);
+        let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+    }
+    let credentials = config_dir().join("credentials.json");
+    let _ = std::fs::set_permissions(credentials, std::fs::Permissions::from_mode(0o600));
+}
+
 fn cache() -> Result<Cache, Error> {
     let config = config_dir();
     Cache::new(

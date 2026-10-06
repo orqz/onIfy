@@ -24,6 +24,8 @@ use gtk::{gio, glib};
 fn main() -> glib::ExitCode {
     #[cfg(target_os = "macos")]
     use_bundled_gtk();
+    #[cfg(unix)]
+    spotify::lock_down_dirs();
     memory::init();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn,onify=info"))
         .init();
