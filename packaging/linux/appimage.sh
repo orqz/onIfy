@@ -21,6 +21,13 @@ fetch linuxdeploy-plugin-gtk.sh https://raw.githubusercontent.com/linuxdeploy/li
 # modules folder to copy; the plugin fails without this guard.
 sed -i 's|^\(\s*\)copy_lib_tree "$gtk4_libdir" "$APPDIR/"$|\1[ -d "$gtk4_libdir" ] \&\& copy_lib_tree "$gtk4_libdir" "$APPDIR/"|' \
     "$tools/linuxdeploy-plugin-gtk.sh"
+# gdk-pixbuf 2.44 decodes through glycin's own loaders (found on the host, as
+# every distro with this gdk-pixbuf has them) and may have no loader folder
+# left to bundle; skip that step then instead of failing.
+if [ ! -d "$(pkg-config --variable=gdk_pixbuf_binarydir gdk-pixbuf-2.0 2>/dev/null || echo /usr/lib/gdk-pixbuf-2.0/2.10.0)" ]; then
+    sed -i '/^gdk_pixbuf_binarydir=/,/^sed -i "s|\$gdk_pixbuf_moduledir\/||g"/d' \
+        "$tools/linuxdeploy-plugin-gtk.sh"
+fi
 export PATH="$tools:$PATH"
 # No FUSE in containers; the tools unpack themselves instead.
 export APPIMAGE_EXTRACT_AND_RUN=1
