@@ -248,7 +248,8 @@ impl Backdrop {
     }
 }
 
-/// Recolours accents (progress bar, playing row, toggles) to match the cover.
+/// Recolours accents (progress bar, playing row, toggles, the logo) to match
+/// the cover.
 fn set_accent([r, g, b]: Rgb) {
     let hex = |c: f32| (c.clamp(0.0, 1.0) * 255.0).round() as u8;
     let color = format!("#{:02x}{:02x}{:02x}", hex(r), hex(g), hex(b));
@@ -265,7 +266,7 @@ fn set_accent([r, g, b]: Rgb) {
             provider
         });
         provider.load_from_string(&format!(
-            ":root {{ --accent-color: {color}; --accent-bg-color: {color}; --accent-fg-color: #101010; }}"
+            ":root {{ --accent-color: {color}; --accent-bg-color: {color}; --accent-fg-color: #101010; --logo-color: {color}; }}"
         ));
     });
 }
