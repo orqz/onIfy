@@ -55,9 +55,12 @@ jobs:
                   GH_TOKEN: ${{ github.token }}
               run: |
                   command -v gh >/dev/null || dnf install -y gh
+                  notes=$(mktemp)
+                  tag=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$GITHUB_REF_NAME" --jq .object.sha)
+                  gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag" --jq .message > "$notes" || true
                   gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
                       gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft \
-                          --title "${GITHUB_REF_NAME#v}" --notes-from-tag || true
+                          --title "${GITHUB_REF_NAME#v}" --notes-file "$notes" || true
                   gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber onIfy-x86_64.flatpak
 
     windows:
@@ -121,9 +124,12 @@ jobs:
               env:
                   GH_TOKEN: ${{ github.token }}
               run: |
+                  notes=$(mktemp)
+                  tag=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$GITHUB_REF_NAME" --jq .object.sha)
+                  gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag" --jq .message > "$notes" || true
                   gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
                       gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft \
-                          --title "${GITHUB_REF_NAME#v}" --notes-from-tag || true
+                          --title "${GITHUB_REF_NAME#v}" --notes-file "$notes" || true
                   gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber dist/onIfy-setup-x86_64.exe
 
             - uses: actions/upload-artifact@v4
@@ -176,9 +182,12 @@ jobs:
               env:
                   GH_TOKEN: ${{ github.token }}
               run: |
+                  notes=$(mktemp)
+                  tag=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$GITHUB_REF_NAME" --jq .object.sha)
+                  gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag" --jq .message > "$notes" || true
                   gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
                       gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft \
-                          --title "${GITHUB_REF_NAME#v}" --notes-from-tag || true
+                          --title "${GITHUB_REF_NAME#v}" --notes-file "$notes" || true
                   gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber dist/onIfy-macos-arm64.dmg
 
             - uses: actions/upload-artifact@v4
