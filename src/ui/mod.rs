@@ -510,9 +510,9 @@ fn build_sidebar() -> (adw::NavigationPage, gtk::ListBox, Glass) {
     session_section.append(Some("Quit"), Some("app.quit"));
     menu.append_section(None, &session_section);
     let menu_button = gtk::MenuButton::builder()
-        .icon_name("onify-open-menu-symbolic")
+        .icon_name("onify-settings-symbolic")
         .menu_model(&menu)
-        .tooltip_text("Main Menu")
+        .tooltip_text("Settings")
         .build();
     // Logo centred over the menu icons below it, the name level with their
     // labels.

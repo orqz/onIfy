@@ -24,7 +24,7 @@
     <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-media-playlist-shuffle-symbolic.svg">icons/onify-media-playlist-shuffle-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-media-skip-backward-symbolic.svg">icons/onify-media-skip-backward-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-media-skip-forward-symbolic.svg">icons/onify-media-skip-forward-symbolic.svg</file>
-    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-open-menu-symbolic.svg">icons/onify-open-menu-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-settings-symbolic.svg">icons/onify-settings-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-playing-symbolic.svg">icons/onify-playing-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-system-search-symbolic.svg">icons/onify-system-search-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="icons/scalable/apps/io.github.orqz.onIfy.svg">icons/io.github.orqz.onIfy.svg</file>
