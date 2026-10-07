@@ -564,7 +564,7 @@ fn build_sidebar() -> (adw::NavigationPage, gtk::ListBox, Glass) {
     logo.set_pixel_size(28);
     let name = gtk::Label::builder().label("onify").xalign(0.0).build();
     name.add_css_class("brand");
-    let version = gtk::Label::builder().label(concat!("v", env!("CARGO_PKG_VERSION"))).xalign(0.0).build();
+    let version = gtk::Label::builder().label(concat!("v", env!("ONIFY_VERSION"))).xalign(0.0).build();
     version.add_css_class("brand-version");
     let names = gtk::Box::builder().orientation(gtk::Orientation::Vertical).valign(gtk::Align::Center).build();
     names.append(&name);
@@ -1166,7 +1166,7 @@ fn install_actions(app: &adw::Application) {
         let about = adw::AboutDialog::builder()
             .application_name("onIfy")
             .application_icon(APP_ID)
-            .version(env!("CARGO_PKG_VERSION"))
+            .version(env!("ONIFY_VERSION"))
             .comments("A native Spotify client that stays smooth and light.")
             .developer_name("orqz")
             .license_type(gtk::License::MitX11)

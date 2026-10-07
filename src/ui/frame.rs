@@ -19,6 +19,7 @@ use windows_sys::Win32::Graphics::Dwm::{
     DwmSetWindowAttribute,
 };
 use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromRect, ScreenToClient};
+use windows_sys::Win32::Media::{timeBeginPeriod, timeEndPeriod};
 use windows_sys::Win32::System::Threading::CreateMutexW;
 use windows_sys::Win32::UI::Controls::MARGINS;
 use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
@@ -75,6 +76,15 @@ pub fn install(window: &gtk::Window) {
         let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
         SetWindowLongPtrW(hwnd, GWL_STYLE, (style | FRAME) as isize);
     }
+    // GTK times frames with GLib timers, which Windows rounds up to its
+    // 15.6 ms tick unless asked for finer ones; GTK only asks during its own
+    // animations, so scrolling ran at about 32 fps. While the window shows:
+    window.connect_map(|_| unsafe {
+        timeBeginPeriod(1);
+    });
+    window.connect_unmap(|_| unsafe {
+        timeEndPeriod(1);
+    });
     // Counted as decorated, GTK wants the frame as well and stops taking it
     // off on every layout (which cost two window calls per animation frame).
     if let Some(toplevel) = window.surface().and_downcast::<gdk::Toplevel>() {

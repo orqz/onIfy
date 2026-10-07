@@ -100,6 +100,8 @@ jobs:
                   $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
                   if (-not (Test-Path $iscc)) { choco install innosetup --no-progress -y }
                   $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"').Matches[0].Groups[1].Value
+                  # a.b.c+d in Cargo.toml is release a.b.c.d (see build.rs)
+                  $version = if ($version -match '\+') { $version -replace '\+', '.' } else { "$version.0" }
                   & $iscc "/DAppVersion=$version" packaging\windows\onIfy.iss
                   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

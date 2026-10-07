@@ -37,6 +37,12 @@ fn main() -> glib::ExitCode {
         std::env::set_var("PULSE_PROP_media.role", "music");
         std::env::set_var("PULSE_PROP_application.icon_name", ui::APP_ID);
     }
+    // GTK only follows the main screen's scaling by default, so Windows
+    // stretched onIfy (blurry) on any monitor scaled differently.
+    #[cfg(windows)]
+    unsafe {
+        std::env::set_var("GDK_WIN32_PER_MONITOR_HIDPI", "1");
+    }
 
     gio::resources_register_include!("onify.gresource").expect("register resources");
     glib::set_application_name("onIfy");

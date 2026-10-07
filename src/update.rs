@@ -20,7 +20,7 @@ use http_body_util::BodyExt;
 use librespot_core::http_client::HttpClient;
 
 const REPO: &str = "orqz/onIfy";
-const CURRENT: &str = env!("CARGO_PKG_VERSION");
+const CURRENT: &str = env!("ONIFY_VERSION");
 
 pub struct Release {
     pub version: String,
@@ -286,5 +286,8 @@ mod tests {
         assert!(!is_newer("0.1.0", "0.1.0"));
         assert!(!is_newer("0.0.9", "0.1.0"));
         assert!(!is_newer("garbage", "0.1.0"));
+        assert!(is_newer("0.1.3.1", "0.1.3"));
+        assert!(is_newer("0.1.4.0", "0.1.3.1"));
+        assert!(!is_newer("0.1.3.1", "0.1.3.1"));
     }
 }

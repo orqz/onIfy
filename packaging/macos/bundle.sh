@@ -10,6 +10,8 @@ set -eu
 
 brew=$(brew --prefix)
 version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+# a.b.c+d in Cargo.toml is release a.b.c.d (see build.rs)
+case $version in *+*) version=$(echo "$version" | tr + .) ;; *) version=$version.0 ;; esac
 minos="$(sw_vers -productVersion | cut -d. -f1).0"
 app=dist/onIfy.app
 contents=$app/Contents
