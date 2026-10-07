@@ -29,6 +29,7 @@ fn main() -> glib::ExitCode {
     spotify::lock_down_dirs();
     memory::init();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn,onify=info"))
+        .format_timestamp_millis()
         .init();
     // Tag the audio stream so PipeWire treats it as music.
     #[cfg(target_os = "linux")]

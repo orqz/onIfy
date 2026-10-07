@@ -35,6 +35,9 @@ struct State {
     playing: bool,
     /// Fade out, then drop everything queued (seek / skip).
     flush: bool,
+    /// When the user skipped, and whether the flush for it has started yet:
+    /// for logging how long until the new song is heard.
+    skipped: Option<(std::time::Instant, bool)>,
 }
 
 pub struct Output {
@@ -57,6 +60,9 @@ impl Renderer {
     /// Moves up to `out.len()` samples from the queue into `out`, applying
     /// fades and volume. Returns how many samples were written.
     fn render(&mut self, out_gain: &AtomicU32, st: &mut State, out: &mut [f32]) -> usize {
+        if let Some((_, flushing)) = &mut st.skipped {
+            *flushing |= st.flush;
+        }
         if st.flush && self.envelope == 0.0 {
             st.queue.clear();
             st.flush = false;
@@ -91,6 +97,12 @@ impl Renderer {
                 break;
             }
         }
+        if written > 0 && target > 0.0 {
+            if let Some((at, true)) = st.skipped {
+                log::debug!("new song heard {} ms after the skip", at.elapsed().as_millis());
+                st.skipped = None;
+            }
+        }
         written
     }
 }
@@ -113,6 +125,11 @@ impl Output {
             envelope: 0.0,
             gain: f32::from_bits(self.gain.load(Ordering::Relaxed)),
         }
+    }
+
+    /// Notes when the user skipped, for timing (see `State::skipped`).
+    pub fn mark_skip(&self) {
+        self.state.lock().unwrap().skipped = Some((std::time::Instant::now(), false));
     }
 
     /// Drop queued audio after a short fade so a seek or skip is heard at once.

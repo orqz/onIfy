@@ -209,6 +209,7 @@ pub struct Engine {
     flush_on_load: Arc<AtomicBool>,
     /// Between asking to play something and it loading (see forward_events).
     loading: Arc<AtomicBool>,
+    output: Arc<Output>,
     shuffle: AtomicBool,
     repeat: AtomicBool,
 }
@@ -259,6 +260,7 @@ impl Engine {
             player,
             flush_on_load: flush_on_load.clone(),
             loading: loading.clone(),
+            output: output.clone(),
             shuffle: AtomicBool::new(false),
             repeat: AtomicBool::new(false),
         });
@@ -336,6 +338,8 @@ impl Engine {
     }
 
     pub fn next(&self) {
+        log::info!("skip requested");
+        self.output.mark_skip();
         self.flush_on_load.store(true, Ordering::Relaxed);
         let _ = self.spirc.next();
     }
