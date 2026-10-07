@@ -10,6 +10,7 @@ use super::ctx;
 pub fn present(window: &adw::ApplicationWindow) {
     let page = adw::PreferencesPage::new();
     page.add(&look_group());
+    page.add(&playback_group());
     page.add(&performance_group());
     page.add(&local_group());
     page.add(&updates_group());
@@ -65,6 +66,27 @@ fn switch(title: &str, subtitle: &str, active: bool, changed: impl Fn(bool) + 's
         save();
     });
     row
+}
+
+fn playback_group() -> adw::PreferencesGroup {
+    use crate::spotify::Quality;
+    let group = adw::PreferencesGroup::builder().title("Playback").build();
+    let labels: Vec<&str> = Quality::ALL.iter().map(|q| q.label()).collect();
+    let current = Quality::from_name(&ctx().settings.borrow().quality);
+    let quality = adw::ComboRow::builder()
+        .title("Streaming Quality")
+        .subtitle("Higher sounds better and uses more data. Takes effect at the next pause")
+        .model(&gtk::StringList::new(&labels))
+        .selected(Quality::ALL.iter().position(|q| *q == current).unwrap_or(2) as u32)
+        .build();
+    quality.connect_selected_notify(|row| {
+        let quality = Quality::ALL.get(row.selected() as usize).copied().unwrap_or(Quality::VeryHigh);
+        ctx().settings.borrow_mut().quality = quality.name().to_owned();
+        save();
+        super::player_settings_changed();
+    });
+    group.add(&quality);
+    group
 }
 
 fn performance_group() -> adw::PreferencesGroup {

@@ -200,6 +200,48 @@ pub enum Event {
     Disconnected(u64),
 }
 
+/// Streaming quality. Spotify offers librespot Ogg Vorbis up to 320 kbps; its
+/// lossless FLAC files aren't offered (librespot_playback logs the formats
+/// each song comes in, at debug level).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Quality {
+    Normal,
+    High,
+    VeryHigh,
+}
+
+impl Quality {
+    pub const ALL: [Quality; 3] = [Quality::Normal, Quality::High, Quality::VeryHigh];
+
+    fn bitrate(self) -> Bitrate {
+        match self {
+            Quality::Normal => Bitrate::Bitrate96,
+            Quality::High => Bitrate::Bitrate160,
+            Quality::VeryHigh => Bitrate::Bitrate320,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Quality::Normal => "normal",
+            Quality::High => "high",
+            Quality::VeryHigh => "very_high",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Self {
+        Self::ALL.into_iter().find(|q| q.name() == name).unwrap_or(Quality::VeryHigh)
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Quality::Normal => "Normal (96 kbps)",
+            Quality::High => "High (160 kbps)",
+            Quality::VeryHigh => "Very high (320 kbps)",
+        }
+    }
+}
+
 pub struct Engine {
     pub session: Session,
     spirc: Spirc,
@@ -218,6 +260,7 @@ impl Engine {
     pub async fn start(
         credentials: Credentials,
         device_id: String,
+        quality: Quality,
         local_folders: Vec<PathBuf>,
         output: Arc<Output>,
         events: UnboundedSender<Event>,
@@ -230,7 +273,7 @@ impl Engine {
         let session = Session::new(session_config, Some(cache()?));
 
         let player_config = PlayerConfig {
-            bitrate: Bitrate::Bitrate320,
+            bitrate: quality.bitrate(),
             normalisation: true,
             position_update_interval: None,
             local_file_directories: local_folders,

@@ -787,13 +787,14 @@ fn connect(credentials: Credentials) {
     let ctx = ctx();
     let generation = ctx.generation.get() + 1;
     ctx.generation.set(generation);
-    let (device_id, folders) = {
+    let (device_id, folders, quality) = {
         let settings = ctx.settings.borrow();
-        (settings.device_id.clone(), settings.local_folders.clone())
+        (settings.device_id.clone(), settings.local_folders.clone(), spotify::Quality::from_name(&settings.quality))
     };
     let (output, events) = (ctx.output.clone(), ctx.events.clone());
     spawn_local(async move {
-        let started = rt::spawn(Engine::start(credentials, device_id, folders, output, events, generation)).await;
+        let started =
+            rt::spawn(Engine::start(credentials, device_id, quality, folders, output, events, generation)).await;
         let ctx = self::ctx();
         if ctx.generation.get() != generation {
             if let Ok(engine) = started {
@@ -843,6 +844,20 @@ fn reconnect() {
             None => show_login("Please log in again."),
         }
     });
+}
+
+/// The player's settings (streaming quality, local folders) are fixed when it
+/// starts, so a change needs a fresh engine. That waits for a pause if music
+/// is playing.
+pub fn player_settings_changed() {
+    let ctx = ctx();
+    if ctx.engine.borrow().is_none() {
+        return;
+    }
+    ctx.engine_stale.set(true);
+    if !ctx.bar.is_playing() {
+        restart_if_stale();
+    }
 }
 
 /// librespot indexes the local folders when its player starts, so new folders

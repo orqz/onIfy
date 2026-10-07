@@ -15,6 +15,8 @@ pub struct Settings {
     pub style: String,
     /// Ask when a new version is out (see crate::update).
     pub check_updates: bool,
+    /// Streaming quality, see spotify::Quality.
+    pub quality: String,
     /// Performance switches.
     pub animations: bool,
     pub cover_background: bool,
@@ -46,6 +48,7 @@ impl Settings {
             background: text("background"),
             style: v["style"].as_str().unwrap_or("vinyl").to_owned(),
             check_updates: v["check_updates"].as_bool().unwrap_or(true),
+            quality: v["quality"].as_str().unwrap_or("very_high").to_owned(),
             animations: v["animations"].as_bool().unwrap_or(true),
             cover_background: v["cover_background"].as_bool().unwrap_or(true),
             hover_preload: v["hover_preload"].as_bool().unwrap_or(true),
@@ -65,6 +68,7 @@ impl Settings {
             "background": self.background,
             "style": self.style,
             "check_updates": self.check_updates,
+            "quality": self.quality,
             "animations": self.animations,
             "cover_background": self.cover_background,
             "hover_preload": self.hover_preload,

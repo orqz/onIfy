@@ -1006,6 +1006,8 @@ impl PlayerTrackLoader {
             audio_item.name, audio_item.uri
         );
 
+        debug!("formats offered for <{}>: {:?}", audio_item.name, audio_item.files.keys().collect::<Vec<_>>());
+
         // (Most) podcasts seem to support only 96 kbps Ogg Vorbis, so fall back to it
         let formats = match self.config.bitrate {
             Bitrate::Bitrate96 => [
@@ -1054,6 +1056,7 @@ impl PlayerTrackLoader {
                 }
             };
 
+        debug!("playing <{}> as {format:?}", audio_item.name);
         let bytes_per_second = self.stream_data_rate(format)?;
 
         // This is only a loop to be able to reload the file if an error occurred
