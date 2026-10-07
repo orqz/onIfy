@@ -31,27 +31,27 @@
 }
 
 window {
-  font-family: "SF Pro Text", "Segoe UI Variable Text", "Adwaita Sans", sans-serif;
+  font-family: "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", "Adwaita Sans", sans-serif;
 }
 
 /* ---------- Type scale ---------- */
 
 .title-hero {
-  font-family: "SF Pro Display", "Segoe UI Variable Display", sans-serif;
+  font-family: "SF Pro Display", "Segoe UI Variable Display", "Segoe UI", sans-serif;
   font-size: 46px;
   font-weight: 800;
   letter-spacing: -1.2px;
 }
 
 .title-page {
-  font-family: "SF Pro Display", "Segoe UI Variable Display", sans-serif;
+  font-family: "SF Pro Display", "Segoe UI Variable Display", "Segoe UI", sans-serif;
   font-size: 30px;
   font-weight: 800;
   letter-spacing: -0.6px;
 }
 
 .title-section {
-  font-family: "SF Pro Display", "Segoe UI Variable Display", sans-serif;
+  font-family: "SF Pro Display", "Segoe UI Variable Display", "Segoe UI", sans-serif;
   font-size: 21px;
   font-weight: 700;
   letter-spacing: -0.3px;
@@ -78,7 +78,7 @@ image.brand-logo {
 }
 
 .brand {
-  font-family: "SF Pro Rounded", "SF Pro Display", sans-serif;
+  font-family: "SF Pro Rounded", "SF Pro Display", "Segoe UI Variable Display", "Segoe UI", sans-serif;
   font-size: 20px;
   font-weight: 800;
   letter-spacing: -0.3px;
@@ -497,7 +497,7 @@ image.accent {
 }
 
 label.lyric-line {
-  font-family: "SF Pro Display", "Segoe UI Variable Display", sans-serif;
+  font-family: "SF Pro Display", "Segoe UI Variable Display", "Segoe UI", sans-serif;
   font-size: 32px;
   font-weight: 800;
   letter-spacing: -0.5px;
@@ -802,7 +802,7 @@ toast {
 }
 
 statuspage > scrolledwindow > viewport > box > clamp > box > .title {
-  font-family: "SF Pro Display", sans-serif;
+  font-family: "SF Pro Display", "Segoe UI Variable Display", "Segoe UI", sans-serif;
   font-weight: 800;
 }
 

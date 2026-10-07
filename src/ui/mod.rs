@@ -179,7 +179,22 @@ pub fn startup(_: &adw::Application) {
     if let Some(settings) = gtk::Settings::default() {
         strip_window_icon(&settings);
         settings.connect_gtk_decoration_layout_notify(strip_window_icon);
+        #[cfg(windows)]
+        windows_fonts(&settings);
     }
+}
+
+/// Windows hands GTK its 9pt menu font, while onIfy is laid out for 11pt
+/// (what Linux uses), and GTK's default rendering leaves small text soft at
+/// 100% scale; snapped to the pixel grid it looks like other Windows apps.
+#[cfg(windows)]
+fn windows_fonts(settings: &gtk::Settings) {
+    settings.set_gtk_font_name(Some("Segoe UI 11"));
+    settings.set_gtk_font_rendering(gtk::FontRendering::Manual);
+    settings.set_gtk_hint_font_metrics(true);
+    settings.set_gtk_xft_antialias(1);
+    settings.set_gtk_xft_hinting(1);
+    settings.set_gtk_xft_hintstyle(Some("hintslight"));
 }
 
 fn strip_window_icon(settings: &gtk::Settings) {

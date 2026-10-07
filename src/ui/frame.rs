@@ -6,13 +6,13 @@
 //! onIfy are its title bar and its maximise button (WM_NCHITTEST), so moving,
 //! snapping and resizing are Windows' own.
 //!
-//! GTK keeps taking that frame off again, and sizes the window as if the frame
-//! showed; `subclass` undoes both.
+//! GTK sizes the window as if the frame showed (and, should it take the frame
+//! off again, shrinks the window by it); `subclass` undoes both.
 
 use std::cell::{Cell, RefCell};
 
 use adw::prelude::*;
-use gtk::glib;
+use gtk::{gdk, glib};
 use windows_sys::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Dwm::{
     DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmExtendFrameIntoClientArea,
@@ -74,6 +74,13 @@ pub fn install(window: &gtk::Window) {
         SetWindowSubclass(hwnd, Some(subclass), 1, 0);
         let style = GetWindowLongPtrW(hwnd, GWL_STYLE) as u32;
         SetWindowLongPtrW(hwnd, GWL_STYLE, (style | FRAME) as isize);
+    }
+    // Counted as decorated, GTK wants the frame as well and stops taking it
+    // off on every layout (which cost two window calls per animation frame).
+    if let Some(toplevel) = window.surface().and_downcast::<gdk::Toplevel>() {
+        toplevel.set_decorated(true);
+    }
+    unsafe {
         // A pixel of Windows' frame inside the window brings its shadow back.
         let margins = MARGINS { cxLeftWidth: 0, cxRightWidth: 0, cyTopHeight: 1, cyBottomHeight: 0 };
         DwmExtendFrameIntoClientArea(hwnd, &margins);
