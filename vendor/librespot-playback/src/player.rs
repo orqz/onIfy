@@ -1569,10 +1569,12 @@ impl Future for PlayerInternal {
                 let track_id = track_id.clone();
 
                 // onIfy: preload the next song as soon as this one is fully
-                // downloaded, not only in its last 30 s, so skipping is instant.
-                let _ = (duration_ms, stream_position_ms, PRELOAD_NEXT_TRACK_BEFORE_END_DURATION_MS);
+                // downloaded, or after its first 3 s if it's still streaming in
+                // (slow connections), not only in its last 30 s, so skipping is
+                // instant.
+                let _ = (duration_ms, PRELOAD_NEXT_TRACK_BEFORE_END_DURATION_MS);
                 if (!*suggested_to_preload_next_track)
-                    && stream_loader_controller.range_to_end_available()
+                    && (stream_loader_controller.range_to_end_available() || stream_position_ms > 3000)
                 {
                     *suggested_to_preload_next_track = true;
                     self.send_event(PlayerEvent::TimeToPreloadNextTrack {
