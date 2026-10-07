@@ -17,6 +17,9 @@ pub struct Settings {
     pub check_updates: bool,
     /// Streaming quality, see spotify::Quality.
     pub quality: String,
+    /// Windows: closing the window keeps onIfy in the tray.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub close_to_tray: bool,
     /// Performance switches.
     pub animations: bool,
     pub cover_background: bool,
@@ -49,6 +52,7 @@ impl Settings {
             style: v["style"].as_str().unwrap_or("vinyl").to_owned(),
             check_updates: v["check_updates"].as_bool().unwrap_or(true),
             quality: v["quality"].as_str().unwrap_or("very_high").to_owned(),
+            close_to_tray: v["close_to_tray"].as_bool().unwrap_or(true),
             animations: v["animations"].as_bool().unwrap_or(true),
             cover_background: v["cover_background"].as_bool().unwrap_or(true),
             hover_preload: v["hover_preload"].as_bool().unwrap_or(true),
@@ -69,6 +73,7 @@ impl Settings {
             "style": self.style,
             "check_updates": self.check_updates,
             "quality": self.quality,
+            "close_to_tray": self.close_to_tray,
             "animations": self.animations,
             "cover_background": self.cover_background,
             "hover_preload": self.hover_preload,

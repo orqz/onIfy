@@ -11,6 +11,8 @@ pub fn present(window: &adw::ApplicationWindow) {
     let page = adw::PreferencesPage::new();
     page.add(&look_group());
     page.add(&playback_group());
+    #[cfg(windows)]
+    page.add(&window_group());
     page.add(&performance_group());
     page.add(&local_group());
     page.add(&updates_group());
@@ -86,6 +88,16 @@ fn playback_group() -> adw::PreferencesGroup {
         super::player_settings_changed();
     });
     group.add(&quality);
+    group
+}
+
+#[cfg(windows)]
+fn window_group() -> adw::PreferencesGroup {
+    let group = adw::PreferencesGroup::builder().title("Window").build();
+    let active = ctx().settings.borrow().close_to_tray;
+    group.add(&switch("Close to Tray", "Closing the window keeps the music playing; quit from the tray icon", active, |on| {
+        ctx().settings.borrow_mut().close_to_tray = on;
+    }));
     group
 }
 

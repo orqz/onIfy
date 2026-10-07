@@ -45,8 +45,8 @@ Filename: "{app}\bin\onify.exe"; Description: "{cm:LaunchProgram,onIfy}"; Flags:
 Filename: "{app}\bin\onify.exe"; Flags: nowait; Check: WizardSilent
 
 [Code]
-// A running onIfy keeps its files locked and stays open next to the new one
-// (Windows has no session bus to make it single-instance), so close it first.
+// A running onIfy (maybe only in the tray) keeps its files locked, and the
+// new one would just hand over to it, so close it first.
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ResultCode: Integer;

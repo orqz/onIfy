@@ -2,6 +2,8 @@
 
 mod backdrop;
 mod cover;
+#[cfg(windows)]
+mod frame;
 mod glass;
 mod integrations;
 mod lyrics;
@@ -9,7 +11,12 @@ mod pages;
 mod player_bar;
 mod preferences;
 mod track_row;
+#[cfg(windows)]
+mod tray;
 mod updater;
+
+#[cfg(windows)]
+pub use frame::hand_over_to_running;
 
 use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::HashMap;
@@ -205,6 +212,14 @@ pub fn activate(app: &adw::Application) {
         .width_request(300)
         .height_request(480)
         .build();
+    // Windows draws the frame, shadow and rounded corners instead of GTK
+    // (frame.rs), so GTK's invisible resize border around the window goes.
+    #[cfg(windows)]
+    {
+        window.set_decorated(false);
+        window.add_css_class("platform-windows");
+        window.connect_realize(|window| frame::install(window.upcast_ref()));
+    }
 
     let login = build_login();
     let home = HomePage::new();
@@ -352,6 +367,12 @@ pub fn activate(app: &adw::Application) {
     });
 
     window.connect_close_request(|_| {
+        // Windows: closing keeps the music going from the tray icon.
+        #[cfg(windows)]
+        if self::ctx().settings.borrow().close_to_tray && tray::shown() {
+            self::ctx().window.set_visible(false);
+            return glib::Propagation::Stop;
+        }
         quit();
         glib::Propagation::Stop
     });
@@ -367,6 +388,8 @@ pub fn activate(app: &adw::Application) {
     window.present();
 
     integrations::start(window.upcast_ref());
+    #[cfg(windows)]
+    tray::start();
     images::prune_disk_cache();
     updater::start();
 }
@@ -1247,6 +1270,8 @@ pub fn quit() {
     let ctx = ctx();
     ctx.generation.set(ctx.generation.get() + 1);
     ctx.window.set_visible(false);
+    #[cfg(windows)]
+    tray::stop();
     let goodbye = match ctx.engine.take() {
         Some(engine) => {
             engine.shutdown();

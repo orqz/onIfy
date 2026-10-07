@@ -911,3 +911,63 @@ cover.hero-record {
   border-radius: 999px;
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.5);
 }
+
+/* Windows: the frame, shadow and rounded corners come from Windows
+   (ui/frame.rs), and the window's buttons look like every other Windows
+   app's: flush in the top right corner, a soft highlight, red behind close. */
+window.platform-windows {
+  border-radius: 0;
+  box-shadow: none;
+  outline: none;
+}
+
+window.platform-windows headerbar windowcontrols.end {
+  margin: -6px -7px -7px 0;
+  border-spacing: 0;
+}
+
+window.platform-windows headerbar windowcontrols > button.minimize,
+window.platform-windows headerbar windowcontrols > button.maximize,
+window.platform-windows headerbar windowcontrols > button.close {
+  min-width: 46px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+  background-color: transparent;
+  box-shadow: none;
+  transition: background-color 90ms linear;
+}
+
+window.platform-windows headerbar windowcontrols > button.minimize > image,
+window.platform-windows headerbar windowcontrols > button.maximize > image,
+window.platform-windows headerbar windowcontrols > button.close > image,
+window.platform-windows headerbar windowcontrols > button.minimize:hover > image,
+window.platform-windows headerbar windowcontrols > button.maximize:hover > image,
+window.platform-windows headerbar windowcontrols > button.close:hover > image {
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  background: none;
+  box-shadow: none;
+}
+
+window.platform-windows headerbar windowcontrols > button.minimize:hover,
+window.platform-windows headerbar windowcontrols > button.maximize:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+window.platform-windows headerbar windowcontrols > button.minimize:active,
+window.platform-windows headerbar windowcontrols > button.maximize:active {
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+window.platform-windows headerbar windowcontrols > button.close:hover {
+  background-color: #c42b1c;
+  color: #ffffff;
+}
+
+window.platform-windows headerbar windowcontrols > button.close:active {
+  background-color: rgba(196, 43, 28, 0.9);
+  color: rgba(255, 255, 255, 0.7);
+}

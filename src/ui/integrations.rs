@@ -1,5 +1,5 @@
-//! The system's media controls follow playback: MPRIS on Linux, SMTC on
-//! Windows, Now Playing on macOS. (Discord and Last.fm hear of plays through
+//! The system's media controls follow playback: MPRIS on Linux, SMTC (and
+//! the tray icon) on Windows, Now Playing on macOS. (Discord and Last.fm hear of plays through
 //! Spotify's own connections, so onIfy needs nothing for them.)
 
 #[cfg(target_os = "linux")]
@@ -35,6 +35,8 @@ pub fn track_changed(now: &NowPlaying) {
     mpris_track(now);
     #[cfg(not(target_os = "linux"))]
     crate::media_controls::set_track(now);
+    #[cfg(windows)]
+    super::tray::set_track(now);
 }
 
 pub fn playing(position_ms: u32) {
@@ -42,6 +44,8 @@ pub fn playing(position_ms: u32) {
     mpris_status(true, position_ms);
     #[cfg(not(target_os = "linux"))]
     crate::media_controls::set_playing(true, position_ms);
+    #[cfg(windows)]
+    super::tray::set_playing(true);
 }
 
 pub fn paused(position_ms: u32) {
@@ -49,6 +53,8 @@ pub fn paused(position_ms: u32) {
     mpris_status(false, position_ms);
     #[cfg(not(target_os = "linux"))]
     crate::media_controls::set_playing(false, position_ms);
+    #[cfg(windows)]
+    super::tray::set_playing(false);
 }
 
 pub fn seeked(position_ms: u32) {

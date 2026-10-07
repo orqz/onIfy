@@ -47,6 +47,12 @@ fn main() -> glib::ExitCode {
         Some(_) => format!("{}.Devel", ui::APP_ID),
         None => ui::APP_ID.to_owned(),
     };
+    // Windows: a second start brings the running onIfy forward (it may be
+    // in the tray) instead of opening another.
+    #[cfg(windows)]
+    if ui::hand_over_to_running(&id) {
+        return glib::ExitCode::SUCCESS;
+    }
     let app = adw::Application::builder()
         .application_id(id)
         .resource_base_path("/io/github/orqz/onIfy")
