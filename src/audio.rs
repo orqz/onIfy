@@ -240,16 +240,21 @@ mod backend {
             .name("onify-audio".into())
             .spawn(move || loop {
                 match open(out.clone()) {
-                    Ok(stream) => {
+                    Ok((stream, device)) => {
                         let _ = stream.play();
-                        // Keep the stream alive; reopen if the device goes away.
-                        while !out.device_lost() {
+                        // Keep the stream alive. Reopen if its device goes away,
+                        // or when the system's default output changes (headphones
+                        // plugged in): a stream stays on the device it opened on.
+                        while !out.device_lost() && default_device().as_deref() == Some(device.as_str()) {
                             std::thread::sleep(Duration::from_millis(500));
                         }
+                        log::info!("audio output changed, reopening");
                     }
-                    Err(e) => log::error!("audio output unavailable: {e}"),
+                    Err(e) => {
+                        log::error!("audio output unavailable: {e}");
+                        std::thread::sleep(Duration::from_secs(1));
+                    }
                 }
-                std::thread::sleep(Duration::from_secs(1));
             })
             .expect("spawn audio thread");
     }
@@ -303,9 +308,16 @@ mod backend {
         }
     }
 
-    fn open(out: Arc<Output>) -> Result<cpal::Stream, String> {
+    /// The name of the system's default output device.
+    fn default_device() -> Option<String> {
+        cpal::default_host().default_output_device()?.name().ok()
+    }
+
+    /// A stream on the default output device, and that device's name.
+    fn open(out: Arc<Output>) -> Result<(cpal::Stream, String), String> {
         let host = cpal::default_host();
         let device = host.default_output_device().ok_or("no output device")?;
+        let name = device.name().map_err(|e| e.to_string())?;
         let wanted = device
             .supported_output_configs()
             .map_err(|e| e.to_string())?
@@ -343,7 +355,7 @@ mod backend {
                 None,
             )
             .map_err(|e| e.to_string())?;
-        Ok(stream)
+        Ok((stream, name))
     }
 }
 
