@@ -29,7 +29,7 @@ Grab the [latest release](https://github.com/orqz/onIfy/releases/latest):
 
 ## Join our Discord Server
 
-https://discord.gg/mrevdwV434
+https://discord.gg/WPKMx4gmwp
 
 ## Building from Source
 

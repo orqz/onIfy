@@ -43,7 +43,7 @@ use pages::{HomePage, Loaded, SearchPage};
 use player_bar::PlayerBar;
 
 pub const APP_ID: &str = "io.github.orqz.onIfy";
-const DISCORD_SERVER: &str = "https://discord.gg/mrevdwV434";
+const DISCORD_SERVER: &str = "https://discord.gg/WPKMx4gmwp";
 const REPO: &str = "https://github.com/orqz/onIfy";
 
 #[derive(Clone)]
@@ -547,10 +547,15 @@ fn build_sidebar() -> (adw::NavigationPage, gtk::ListBox, Glass) {
     let logo = gtk::Image::from_icon_name("onify-logo-symbolic");
     logo.add_css_class("brand-logo");
     logo.set_pixel_size(28);
-    let name = gtk::Label::new(Some("onIfy"));
+    let name = gtk::Label::builder().label("onify").xalign(0.0).build();
     name.add_css_class("brand");
+    let version = gtk::Label::builder().label(concat!("v", env!("CARGO_PKG_VERSION"))).xalign(0.0).build();
+    version.add_css_class("brand-version");
+    let names = gtk::Box::builder().orientation(gtk::Orientation::Vertical).valign(gtk::Align::Center).build();
+    names.append(&name);
+    names.append(&version);
     brand.append(&logo);
-    brand.append(&name);
+    brand.append(&names);
     let header = adw::HeaderBar::new();
     header.set_show_title(false);
     header.pack_start(&brand);
