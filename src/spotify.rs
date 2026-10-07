@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use librespot_connect::{
     ConnectConfig, LoadContextOptions, LoadRequest, LoadRequestOptions, Options, PlayingTrack,
@@ -198,6 +199,9 @@ pub enum Event {
     Unavailable,
     /// The engine with this generation lost its connection.
     Disconnected(u64),
+    /// The account behind the engine with this generation isn't Premium,
+    /// which Spotify needs to stream to other apps.
+    NotPremium(u64),
 }
 
 /// Streaming quality. Spotify offers librespot Ogg Vorbis up to 320 kbps; its
@@ -312,6 +316,21 @@ impl Engine {
         tokio::spawn(async move {
             spirc_task.await;
             let _ = done.send(Event::Disconnected(generation));
+        });
+        // Spotify says which plan the account is on shortly after connecting.
+        let session = engine.session.clone();
+        let refused = events.clone();
+        tokio::spawn(async move {
+            for _ in 0..100 {
+                if let Some(kind) = session.get_user_attribute("type") {
+                    if kind != "premium" {
+                        log::warn!("{kind} account; onIfy needs Premium");
+                        let _ = refused.send(Event::NotPremium(generation));
+                    }
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
         });
         tokio::spawn(forward_events(player_events, events, output, flush_on_load, loading));
         Ok(engine)

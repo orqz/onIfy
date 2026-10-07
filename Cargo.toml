@@ -45,6 +45,8 @@ windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_Wind
 # the rest (see vendor/librespot-playback/src/decoder/resampler.rs).
 [patch.crates-io]
 librespot-playback = { path = "vendor/librespot-playback" }
+# Free accounts made this exit the whole app (see vendor/librespot-core/ONIFY.md).
+librespot-core = { path = "vendor/librespot-core" }
 
 [build-dependencies]
 glib-build-tools = "0.22"

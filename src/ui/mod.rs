@@ -1123,6 +1123,12 @@ fn handle_event(event: Event) {
                 reconnect();
             }
         }
+        Event::NotPremium(generation) => {
+            if generation == ctx.generation.get() {
+                logout();
+                show_login("onIfy needs Spotify Premium: Spotify only streams to other apps for Premium accounts.");
+            }
+        }
     }
 }
 
