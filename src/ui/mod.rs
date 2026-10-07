@@ -446,7 +446,7 @@ fn build_login() -> Login {
     content.append(&status);
     let page = adw::StatusPage::builder()
         .icon_name(APP_ID)
-        .title("onIfy")
+        .title("onify")
         .description("Spotify, smooth as butter.\nRequires Spotify Premium.")
         .child(&content)
         .vexpand(true)
