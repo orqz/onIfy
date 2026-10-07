@@ -207,6 +207,8 @@ pub struct Engine {
     player: Arc<Player>,
     /// Set when the user skips, so the old track's queued tail is dropped.
     flush_on_load: Arc<AtomicBool>,
+    /// Between asking to play something and it loading (see forward_events).
+    loading: Arc<AtomicBool>,
     shuffle: AtomicBool,
     repeat: AtomicBool,
 }
@@ -250,11 +252,13 @@ impl Engine {
             Spirc::new(connect_config, session.clone(), credentials, player.clone(), mixer).await?;
 
         let flush_on_load = Arc::new(AtomicBool::new(false));
+        let loading = Arc::new(AtomicBool::new(false));
         let engine = Arc::new(Self {
             session,
             spirc,
             player,
             flush_on_load: flush_on_load.clone(),
+            loading: loading.clone(),
             shuffle: AtomicBool::new(false),
             repeat: AtomicBool::new(false),
         });
@@ -264,7 +268,7 @@ impl Engine {
             spirc_task.await;
             let _ = done.send(Event::Disconnected(generation));
         });
-        tokio::spawn(forward_events(player_events, events, output, flush_on_load));
+        tokio::spawn(forward_events(player_events, events, output, flush_on_load, loading));
         Ok(engine)
     }
 
@@ -285,6 +289,7 @@ impl Engine {
         // Timestamps for how long a song takes to start (see "now playing").
         log::info!("play requested");
         self.flush_on_load.store(true, Ordering::Relaxed);
+        self.loading.store(true, Ordering::Relaxed);
         let _ = self.spirc.activate();
         let _ = self.spirc.load(request);
     }
@@ -377,6 +382,7 @@ async fn forward_events(
     events: UnboundedSender<Event>,
     output: Arc<Output>,
     flush_on_load: Arc<AtomicBool>,
+    loading: Arc<AtomicBool>,
 ) {
     // librespot announces a new request before it reports the old one as
     // stopped, so events can arrive for a song that's already been replaced.
@@ -392,6 +398,22 @@ async fn forward_events(
         }
         if event.get_play_request_id().is_some_and(|id| current.is_some_and(|c| c != id)) {
             continue;
+        }
+        // Starting playback activates this device first, and librespot then
+        // announces its settings as they were before the request: shuffle and
+        // repeat off. The request's own shuffle and repeat apply right after,
+        // unannounced, so believing these turned shuffle off for the next one.
+        match event {
+            PlayerEvent::ShuffleChanged { .. } | PlayerEvent::RepeatChanged { .. }
+                if loading.load(Ordering::Relaxed) =>
+            {
+                continue;
+            }
+            PlayerEvent::Loading { .. }
+            | PlayerEvent::Playing { .. }
+            | PlayerEvent::Paused { .. }
+            | PlayerEvent::Stopped { .. } => loading.store(false, Ordering::Relaxed),
+            _ => {}
         }
         let event = match event {
             PlayerEvent::Seeked { position_ms, .. } => {

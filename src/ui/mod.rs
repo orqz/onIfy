@@ -1143,6 +1143,10 @@ fn install_actions(app: &adw::Application) {
             navigate(route, true);
         });
         with_string("dev-update", |_| updater::update_now());
+        with_string("dev-volume", |_| ctx().bar.show_volume_pop());
+        with_string("dev-shuffle", |_| ctx().bar.toggle_shuffle());
+        // Plays a playlist or album from the top, as its Play button does.
+        with_string("dev-play-context", |uri| ctx().with_engine(|e| e.play_context(uri, None, None)));
         with_string("dev-search", |query| {
             navigate(Route::Search, true);
             ctx().search.entry.set_text(query);

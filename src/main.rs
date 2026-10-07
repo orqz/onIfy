@@ -40,8 +40,15 @@ fn main() -> glib::ExitCode {
     gio::resources_register_include!("onify.gresource").expect("register resources");
     glib::set_application_name("onIfy");
 
+    // A development copy (ONIFY_DEV) gets its own id, so it runs next to an
+    // installed onIfy instead of handing over to it.
+    let id = match std::env::var_os("ONIFY_DEV") {
+        Some(_) => format!("{}.Devel", ui::APP_ID),
+        None => ui::APP_ID.to_owned(),
+    };
     let app = adw::Application::builder()
-        .application_id(ui::APP_ID)
+        .application_id(id)
+        .resource_base_path("/io/github/orqz/onIfy")
         .flags(gio::ApplicationFlags::HANDLES_OPEN)
         .build();
     app.connect_startup(ui::startup);

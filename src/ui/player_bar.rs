@@ -615,6 +615,11 @@ impl PlayerBar {
     }
 
     /// A volume change from outside the slider: keys or media controls.
+    /// Developer aid (ONIFY_DEV): opens the narrow-window volume pop-up.
+    pub fn show_volume_pop(&self) {
+        self.volume_pop.popup();
+    }
+
     pub fn set_volume_by_user(&self, value: f64) {
         let value = value.clamp(0.0, 1.0);
         self.state.borrow_mut().muted_from = None;
