@@ -215,6 +215,19 @@ fn replace_file(target: &Path, data: &[u8]) -> Result<(), String> {
     relaunch_after_exit("exec \"$2\"", &[target.as_os_str()])
 }
 
+/// Deletes installers left in the temp folder by earlier updates (the one
+/// that just ran may still be finishing; it goes on the next start).
+pub fn clean_up_installers() {
+    let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else { return };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with("onIfy-setup") && name.ends_with(".exe") {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
 /// The installer replaces onIfy once it has quit, then starts it again (see
 /// the [Run] section of packaging/windows/onIfy.iss).
 fn run_installer(name: &str, data: &[u8]) -> Result<(), String> {

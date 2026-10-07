@@ -19,6 +19,9 @@ thread_local! {
 /// These checks are quiet: offline or no releases, nothing shows.
 pub fn start() {
     let install = update::install();
+    if install == Install::WindowsInstaller {
+        glib::timeout_add_local_once(Duration::from_secs(30), update::clean_up_installers);
+    }
     if install == Install::Flatpak || (install == Install::Manual && std::env::var_os("ONIFY_DEV").is_none()) {
         return;
     }
