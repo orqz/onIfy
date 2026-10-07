@@ -776,9 +776,11 @@ scale.progress:disabled trough {
 
 /* ---------- Floating surfaces ---------- */
 
+/* A pill, but with its real radius: GTK makes a popover at least twice its
+   corner radius in each direction, so 999px gave a 2000px circle. */
 popover.volume-pop > contents {
   padding: 10px 14px;
-  border-radius: 999px;
+  border-radius: 18px;
 }
 
 popover > contents {
