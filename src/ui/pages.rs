@@ -53,11 +53,91 @@ pub fn page(title: &str, tag: &str, content: &impl IsA<gtk::Widget>, header: &ad
 }
 
 fn scrolled(child: &impl IsA<gtk::Widget>) -> gtk::ScrolledWindow {
-    gtk::ScrolledWindow::builder()
+    let scroller = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
         .vexpand(true)
         .child(child)
-        .build()
+        .build();
+    glide_wheel(&scroller);
+    scroller
+}
+
+/// How long one wheel notch glides for.
+const GLIDE_US: i64 = 160_000;
+
+struct Glide {
+    from: f64,
+    to: f64,
+    started: i64,
+    /// The value this last set; anything else means the user took over.
+    set: f64,
+    tick: gtk::TickCallbackId,
+}
+
+/// Windows: a mouse wheel moves in whole notches and GTK jumps each one at
+/// once (about 90px), which reads as stutter; other Windows apps glide a
+/// notch instead, so this does too. Touchpads already scroll smoothly.
+pub fn glide_wheel(scroller: &gtk::ScrolledWindow) {
+    if !cfg!(windows) {
+        return;
+    }
+    let glide: Rc<RefCell<Option<Glide>>> = Rc::default();
+    let wheel = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
+    wheel.set_propagation_phase(gtk::PropagationPhase::Capture);
+    wheel.connect_scroll(glib::clone!(
+        #[weak]
+        scroller,
+        #[upgrade_or]
+        glib::Propagation::Proceed,
+        move |wheel, _, dy| {
+            let animate = gtk::Settings::default().is_some_and(|s| s.is_gtk_enable_animations());
+            let shift = wheel.current_event_state().contains(gtk::gdk::ModifierType::SHIFT_MASK);
+            if wheel.unit() != gtk::gdk::ScrollUnit::Wheel || shift || !animate {
+                return glib::Propagation::Proceed;
+            }
+            let adj = scroller.vadjustment();
+            let end = (adj.upper() - adj.page_size()).max(adj.lower());
+            let mut slot = glide.borrow_mut();
+            // Notches in a row add up, from where the last one was heading.
+            let base = match slot.take() {
+                Some(old) => {
+                    old.tick.remove();
+                    if (adj.value() - old.set).abs() < 1.0 { old.to } else { adj.value() }
+                }
+                None => adj.value(),
+            };
+            let to = (base + dy * adj.page_size().powf(2.0 / 3.0)).clamp(adj.lower(), end);
+            let tick = scroller.add_tick_callback(glib::clone!(
+                #[strong]
+                glide,
+                move |scroller, clock| step_glide(scroller, clock, &glide)
+            ));
+            *slot = Some(Glide { from: adj.value(), to, started: glib::monotonic_time(), set: adj.value(), tick });
+            glib::Propagation::Stop
+        }
+    ));
+    scroller.add_controller(wheel);
+}
+
+fn step_glide(scroller: &gtk::ScrolledWindow, clock: &gtk::gdk::FrameClock, glide: &RefCell<Option<Glide>>) -> glib::ControlFlow {
+    let mut slot = glide.borrow_mut();
+    let Some(g) = slot.as_mut() else { return glib::ControlFlow::Break };
+    let adj = scroller.vadjustment();
+    // Dragging the scrollbar (or the page changing under it) ends the glide.
+    if (adj.value() - g.set).abs() >= 1.0 {
+        *slot = None;
+        return glib::ControlFlow::Break;
+    }
+    let t = ((clock.frame_time() - g.started) as f64 / GLIDE_US as f64).clamp(0.0, 1.0);
+    let eased = 1.0 - (1.0 - t).powi(3);
+    let end = (adj.upper() - adj.page_size()).max(adj.lower());
+    adj.set_value((g.from + (g.to - g.from) * eased).clamp(adj.lower(), end));
+    g.set = adj.value();
+    if t >= 1.0 {
+        *slot = None;
+        return glib::ControlFlow::Break;
+    }
+    glib::ControlFlow::Continue
 }
 
 /// A header bar whose title fades in once the page's own title scrolls away.

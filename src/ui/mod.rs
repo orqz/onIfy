@@ -185,16 +185,36 @@ pub fn startup(_: &adw::Application) {
 }
 
 /// Windows hands GTK its 9pt menu font, while onIfy is laid out for 11pt
-/// (what Linux uses), and GTK's default rendering leaves small text soft at
-/// 100% scale; snapped to the pixel grid it looks like other Windows apps.
+/// (what Linux uses), and Segoe UI rendered badly through GTK; onIfy brings
+/// Adwaita Sans, the font libadwaita is drawn for (data/fonts).
 #[cfg(windows)]
 fn windows_fonts(settings: &gtk::Settings) {
-    settings.set_gtk_font_name(Some("Segoe UI 11"));
+    use gtk::pango::prelude::*;
+    let font_map = gtk::Label::new(None).pango_context().font_map();
+    let loaded = bundled_font().zip(font_map).is_some_and(|(file, map)| match map.add_font_file(&file) {
+        Ok(()) => true,
+        Err(e) => {
+            log::warn!("couldn't load {}: {e}", file.display());
+            false
+        }
+    });
+    settings.set_gtk_font_name(Some(if loaded { "Adwaita Sans 11" } else { "Segoe UI 11" }));
     settings.set_gtk_font_rendering(gtk::FontRendering::Manual);
     settings.set_gtk_hint_font_metrics(true);
     settings.set_gtk_xft_antialias(1);
     settings.set_gtk_xft_hinting(1);
     settings.set_gtk_xft_hintstyle(Some("hintslight"));
+}
+
+/// The installer puts the font in share\onify\fonts next to bin\; a copy
+/// run from the source tree uses the repo's.
+#[cfg(windows)]
+fn bundled_font() -> Option<std::path::PathBuf> {
+    const FILE: &str = "AdwaitaSans-Regular.ttf";
+    let exe = std::env::current_exe().ok()?;
+    let installed = exe.parent()?.parent()?.join("share").join("onify").join("fonts").join(FILE);
+    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data").join("fonts").join(FILE);
+    [installed, source].into_iter().find(|path| path.is_file())
 }
 
 fn strip_window_icon(settings: &gtk::Settings) {
@@ -581,6 +601,7 @@ fn build_sidebar() -> (adw::NavigationPage, gtk::ListBox, Glass) {
         .hscrollbar_policy(gtk::PolicyType::Never)
         .child(&list)
         .build();
+    pages::glide_wheel(&scroller);
     toolbar.set_content(Some(&scroller));
     toolbar.set_vexpand(true);
     // A floating glass panel; rows scroll inside its rounded corners.
@@ -1240,7 +1261,13 @@ fn install_actions(app: &adw::Application) {
         });
     }
     with_string("copy-text", |text| {
-        ctx().window.clipboard().set_text(text);
+        #[cfg(windows)]
+        let copied = frame::copy_text(text);
+        #[cfg(not(windows))]
+        let copied = false;
+        if !copied {
+            ctx().window.clipboard().set_text(text);
+        }
         toast("Link copied");
     });
     with_string("queue", |uri| {

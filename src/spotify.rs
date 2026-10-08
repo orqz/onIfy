@@ -404,11 +404,14 @@ impl Engine {
         self.output.mark_skip();
         self.flush_on_load.store(true, Ordering::Relaxed);
         let _ = self.spirc.next();
+        // Skipping plays, even from pause (librespot kept the pause).
+        let _ = self.spirc.play();
     }
 
     pub fn prev(&self) {
         self.flush_on_load.store(true, Ordering::Relaxed);
         let _ = self.spirc.prev();
+        let _ = self.spirc.play();
     }
 
     pub fn seek(&self, position_ms: u32) {

@@ -2979,19 +2979,6 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/librespot-connect/librespot-connect-0.8.0.crate",
-        "sha256": "4b2a21e9e19b906c6676b1a515fc5529d5414f69049f5a167dfb2ea3206e5a27",
-        "dest": "cargo/vendor/librespot-connect-0.8.0"
-    },
-    {
-        "type": "inline",
-        "contents": "{\"package\": \"4b2a21e9e19b906c6676b1a515fc5529d5414f69049f5a167dfb2ea3206e5a27\", \"files\": {}}",
-        "dest": "cargo/vendor/librespot-connect-0.8.0",
-        "dest-filename": ".cargo-checksum.json"
-    },
-    {
-        "type": "archive",
-        "archive-type": "tar-gzip",
         "url": "https://static.crates.io/crates/librespot-metadata/librespot-metadata-0.8.0.crate",
         "sha256": "9a9c688aa2acd3ed2498e31a95d6f2be49c0f18128db8958450ffd628aa88532",
         "dest": "cargo/vendor/librespot-metadata-0.8.0"

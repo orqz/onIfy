@@ -13,13 +13,17 @@ use std::cell::{Cell, RefCell};
 
 use adw::prelude::*;
 use gtk::{gdk, glib};
-use windows_sys::Win32::Foundation::{ERROR_ALREADY_EXISTS, GetLastError, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows_sys::Win32::Foundation::{
+    ERROR_ALREADY_EXISTS, GetLastError, GlobalFree, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM,
+};
 use windows_sys::Win32::Graphics::Dwm::{
     DWMWA_USE_IMMERSIVE_DARK_MODE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmExtendFrameIntoClientArea,
     DwmSetWindowAttribute,
 };
 use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromRect, ScreenToClient};
 use windows_sys::Win32::Media::{timeBeginPeriod, timeEndPeriod};
+use windows_sys::Win32::System::DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData};
+use windows_sys::Win32::System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock};
 use windows_sys::Win32::System::Threading::CreateMutexW;
 use windows_sys::Win32::UI::Controls::MARGINS;
 use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
@@ -109,6 +113,36 @@ pub fn install(window: &gtk::Window) {
         );
         // Marks the window for a second onIfy to find (hand_over_to_running).
         SetPropW(hwnd, wide(&id).as_ptr(), std::ptr::without_provenance_mut(1));
+    }
+}
+
+/// Puts `text` on the clipboard right away. GTK's Windows clipboard only
+/// hands text over once something pastes, and song links went missing.
+pub fn copy_text(text: &str) -> bool {
+    const CF_UNICODETEXT: u32 = 13;
+    let window = WINDOW.with_borrow(|w| w.as_ref().and_then(|w| w.upgrade()));
+    let Some(hwnd) = window.as_ref().and_then(hwnd) else { return false };
+    let text = wide(text);
+    unsafe {
+        if OpenClipboard(hwnd) == 0 {
+            return false;
+        }
+        EmptyClipboard();
+        let mut copied = false;
+        let memory = GlobalAlloc(GMEM_MOVEABLE, text.len() * 2);
+        if !memory.is_null() {
+            let target = GlobalLock(memory).cast::<u16>();
+            if !target.is_null() {
+                std::ptr::copy_nonoverlapping(text.as_ptr(), target, text.len());
+                GlobalUnlock(memory);
+                copied = !SetClipboardData(CF_UNICODETEXT, memory).is_null();
+            }
+            if !copied {
+                GlobalFree(memory);
+            }
+        }
+        CloseClipboard();
+        copied
     }
 }
 
