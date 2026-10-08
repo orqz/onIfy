@@ -17,7 +17,7 @@ pub struct Settings {
     pub check_updates: bool,
     /// Streaming quality, see spotify::Quality.
     pub quality: String,
-    /// Windows: closing the window keeps onIfy in the tray.
+    /// Windows: closing the window keeps onify in the tray.
     #[cfg_attr(not(windows), allow(dead_code))]
     pub close_to_tray: bool,
     /// Performance switches.

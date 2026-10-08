@@ -1,11 +1,11 @@
 #!/bin/sh
-# Builds dist/onIfy.app (and dist/onIfy-macos-arm64.dmg) from
+# Builds dist/onify.app (and dist/onify-macos-arm64.dmg) from
 # target/release/onify and the Homebrew GTK it links against. Run from the
 # repo root on a Mac with `brew install gtk4 libadwaita librsvg
 # adwaita-icon-theme dylibbundler`, after `cargo build --release`.
 #
 # Signed ad hoc, not with an Apple ID: the first open needs right-click →
-# Open (or `xattr -dr com.apple.quarantine /Applications/onIfy.app`).
+# Open (or `xattr -dr com.apple.quarantine /Applications/onify.app`).
 set -eu
 
 brew=$(brew --prefix)
@@ -13,7 +13,7 @@ version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 # a.b.c+d in Cargo.toml is release a.b.c.d (see build.rs)
 case $version in *+*) version=$(echo "$version" | tr + .) ;; *) version=$version.0 ;; esac
 minos="$(sw_vers -productVersion | cut -d. -f1).0"
-app=dist/onIfy.app
+app=dist/onify.app
 contents=$app/Contents
 rm -rf "$app" dist/dmg
 mkdir -p "$contents/MacOS" "$contents/Resources" "$contents/Frameworks"
@@ -23,7 +23,7 @@ cp packaging/macos/onify.icns "$contents/Resources/"
 sed -e "s/@VERSION@/$version/g" -e "s/@MINOS@/$minos/g" packaging/macos/Info.plist > "$contents/Info.plist"
 
 # Image loaders (SVG icons go through librsvg's), with a loader list whose
-# paths onIfy fills in at startup (use_bundled_gtk in main.rs).
+# paths onify fills in at startup (use_bundled_gtk in main.rs).
 pixbuf="$contents/Resources/lib/gdk-pixbuf-2.0/2.10.0"
 mkdir -p "$pixbuf/loaders"
 find "$brew/lib/gdk-pixbuf-2.0/2.10.0/loaders" \( -name '*.so' -o -name '*.dylib' \) -exec cp -L {} "$pixbuf/loaders/" \;
@@ -70,8 +70,8 @@ cp -R "$app" dist/dmg/
 ln -s /Applications dist/dmg/Applications
 # hdiutil is sometimes "busy" on CI machines; give it a few tries.
 for attempt in 1 2 3 4 5; do
-    hdiutil create -volname onIfy -srcfolder dist/dmg -ov -format UDZO dist/onIfy-macos-arm64.dmg && break
+    hdiutil create -volname onify -srcfolder dist/dmg -ov -format UDZO dist/onify-macos-arm64.dmg && break
     sleep 5
 done
 rm -rf dist/dmg
-ls -lh dist/onIfy-macos-arm64.dmg
+ls -lh dist/onify-macos-arm64.dmg

@@ -236,7 +236,7 @@ mod backend {
             minreq: u32::MAX,
             fragsize: u32::MAX,
         };
-        Simple::new(None, "onIfy", Direction::Playback, None, "Music", &spec, None, Some(&attr))
+        Simple::new(None, "onify", Direction::Playback, None, "Music", &spec, None, Some(&attr))
     }
 }
 

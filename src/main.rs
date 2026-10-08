@@ -1,6 +1,6 @@
-//! onIfy: a native Spotify client that stays smooth and light.
+//! onify: a native Spotify client that stays smooth and light.
 
-// Release builds on Windows open no console window next to onIfy's own.
+// Release builds on Windows open no console window next to onify's own.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod api;
@@ -38,22 +38,22 @@ fn main() -> glib::ExitCode {
         std::env::set_var("PULSE_PROP_application.icon_name", ui::APP_ID);
     }
     // GTK only follows the main screen's scaling by default, so Windows
-    // stretched onIfy (blurry) on any monitor scaled differently.
+    // stretched onify (blurry) on any monitor scaled differently.
     #[cfg(windows)]
     unsafe {
         std::env::set_var("GDK_WIN32_PER_MONITOR_HIDPI", "1");
     }
 
     gio::resources_register_include!("onify.gresource").expect("register resources");
-    glib::set_application_name("onIfy");
+    glib::set_application_name("onify");
 
     // A development copy (ONIFY_DEV) gets its own id, so it runs next to an
-    // installed onIfy instead of handing over to it.
+    // installed onify instead of handing over to it.
     let id = match std::env::var_os("ONIFY_DEV") {
         Some(_) => format!("{}.Devel", ui::APP_ID),
         None => ui::APP_ID.to_owned(),
     };
-    // Windows: a second start brings the running onIfy forward (it may be
+    // Windows: a second start brings the running onify forward (it may be
     // in the tray) instead of opening another.
     #[cfg(windows)]
     if ui::hand_over_to_running(&id) {
@@ -71,7 +71,7 @@ fn main() -> glib::ExitCode {
     app.run()
 }
 
-/// Inside onIfy.app, GTK's icons, settings schemas and image loaders ship in
+/// Inside onify.app, GTK's icons, settings schemas and image loaders ship in
 /// Contents/Resources rather than Homebrew's prefix (packaging/macos). Windows
 /// needs nothing like this: GTK finds bin/../share there by itself.
 #[cfg(target_os = "macos")]

@@ -42,7 +42,7 @@ pub fn check(manual: bool) {
         let asked = install.clone();
         match rt::spawn(async move { update::newer(&asked).await }).await {
             Ok(Some(release)) => offer(release, install),
-            Ok(None) if manual => toast(&format!("onIfy {} is the latest version", update::current())),
+            Ok(None) if manual => toast(&format!("onify {} is the latest version", update::current())),
             Err(e) if manual => toast(&format!("Couldn't check for updates: {e}")),
             _ => {}
         }
@@ -51,9 +51,9 @@ pub fn check(manual: bool) {
 
 fn offer(release: Release, install: Install) {
     let automatic = release.installable(&install);
-    let mut body = format!("onIfy {} is out. You have {}.", release.version, update::current());
+    let mut body = format!("onify {} is out. You have {}.", release.version, update::current());
     match install {
-        _ if automatic => body.push_str(" onIfy restarts once it's installed."),
+        _ if automatic => body.push_str(" onify restarts once it's installed."),
         Install::Package => body.push_str("\n\nUpdate it with your package manager: yay -Syu"),
         _ => body.push_str("\n\nGet it from the download page."),
     }
@@ -105,7 +105,7 @@ pub fn update_now() {
 }
 
 fn apply(release: Release, install: Install) {
-    toast(&format!("Downloading onIfy {}…", release.version));
+    toast(&format!("Downloading onify {}…", release.version));
     glib::spawn_future_local(async move {
         match rt::spawn(async move { update::install_release(&release, &install).await }).await {
             Ok(()) => super::quit(),

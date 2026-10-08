@@ -171,7 +171,7 @@ pub fn web_link(uri: &str) -> String {
     }
 }
 
-/// Clicking a link in `label` opens that page in onIfy.
+/// Clicking a link in `label` opens that page in onify.
 pub fn open_links(label: &gtk::Label) {
     label.connect_activate_link(|_, link| {
         if let Some(uri) = super::uri_of_link(link) {

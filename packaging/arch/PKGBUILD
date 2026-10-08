@@ -1,6 +1,6 @@
 # Maintainer: orqz
 #
-# onIfy as a normal Arch package: pacman installs it to /usr, yay updates it.
+# onify as a normal Arch package: pacman installs it to /usr, yay updates it.
 # Builds the release tagged v$pkgver. Locally: `makepkg -si` in this folder.
 # For the AUR, copy this file there with `makepkg --printsrcinfo > .SRCINFO`.
 
@@ -9,11 +9,11 @@ pkgver=0.1.3.2
 pkgrel=1
 pkgdesc="A smooth, lightweight Spotify client (needs Spotify Premium)"
 arch=('x86_64' 'aarch64')
-url="https://github.com/orqz/onIfy"
+url="https://github.com/orqz/onify"
 license=('MIT')
 depends=('gtk4' 'libadwaita' 'pango' 'graphene' 'glib2' 'libpulse' 'openssl' 'libgcc' 'glibc' 'hicolor-icon-theme')
 makedepends=('cargo' 'git')
-source=("$pkgname::git+https://github.com/orqz/onIfy.git#tag=v$pkgver")
+source=("$pkgname::git+https://github.com/orqz/onify.git#tag=v$pkgver")
 sha256sums=('SKIP')
 
 prepare() {

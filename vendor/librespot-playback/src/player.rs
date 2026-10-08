@@ -1571,7 +1571,7 @@ impl Future for PlayerInternal {
             {
                 let track_id = track_id.clone();
 
-                // onIfy: preload the next song as soon as this one is fully
+                // onify: preload the next song as soon as this one is fully
                 // downloaded, or after its first 3 s if it's still streaming in
                 // (slow connections), not only in its last 30 s, so skipping is
                 // instant.
@@ -2436,7 +2436,7 @@ impl PlayerInternal {
                 (read_ahead_during_playback.as_secs_f32() * bytes_per_second as f32) as usize;
 
             // Request the part we want to wait for blocking. This effectively means we wait for the previous request to partially complete.
-            // onIfy: wait for the before-playback amount (1 s), not the whole 5 s read-ahead.
+            // onify: wait for the before-playback amount (1 s), not the whole 5 s read-ahead.
             let read_ahead_before_playback = AudioFetchParams::get().read_ahead_before_playback;
             let wait_for_data_length =
                 (read_ahead_before_playback.as_secs_f32() * bytes_per_second as f32) as usize;

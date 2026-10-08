@@ -1,6 +1,6 @@
 //! The system's media controls follow playback: MPRIS on Linux, SMTC (and
 //! the tray icon) on Windows, Now Playing on macOS. (Discord and Last.fm hear of plays through
-//! Spotify's own connections, so onIfy needs nothing for them.)
+//! Spotify's own connections, so onify needs nothing for them.)
 
 #[cfg(target_os = "linux")]
 use gtk::glib;

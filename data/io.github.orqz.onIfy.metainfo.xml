@@ -3,7 +3,7 @@
   <id>io.github.orqz.onIfy</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT</project_license>
-  <name>onIfy</name>
+  <name>onify</name>
   <summary>Lightweight Spotify client</summary>
   <developer id="io.github.orqz">
     <name>orqz</name>
@@ -16,15 +16,15 @@
       <li>Play counts, synced lyrics and local files</li>
       <li>Shows up as a Spotify Connect device</li>
     </ul>
-    <p>Needs Spotify Premium. onIfy isn't affiliated with Spotify.</p>
+    <p>Needs Spotify Premium. onify isn't affiliated with Spotify.</p>
   </description>
   <launchable type="desktop-id">io.github.orqz.onIfy.desktop</launchable>
-  <url type="homepage">https://github.com/orqz/onIfy</url>
-  <url type="bugtracker">https://github.com/orqz/onIfy/issues</url>
-  <url type="vcs-browser">https://github.com/orqz/onIfy</url>
+  <url type="homepage">https://github.com/orqz/onify</url>
+  <url type="bugtracker">https://github.com/orqz/onify/issues</url>
+  <url type="vcs-browser">https://github.com/orqz/onify</url>
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/orqz/onIfy/main/.github/assets/screenshot.png</image>
+      <image>https://raw.githubusercontent.com/orqz/onify/main/.github/assets/screenshot.png</image>
       <caption>An album playing with the Vinyl theme</caption>
     </screenshot>
   </screenshots>

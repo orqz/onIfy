@@ -769,7 +769,7 @@ fn load_tracks(kind: Kind, uri: &str) -> Rc<Loaded> {
     let weak = Rc::downgrade(&loaded);
     glib::spawn_future_local(async move {
         // What this list looked like last time, from disk, straight away,
-        // even while onIfy is still connecting to Spotify.
+        // even while onify is still connecting to Spotify.
         let (offline, cached_id) = (Api::cache_only(), id.clone());
         let cached = rt::spawn(async move { offline.all_tracks(kind, cached_id).await }).await;
         let shown_uris: Option<Vec<String>> = match cached {

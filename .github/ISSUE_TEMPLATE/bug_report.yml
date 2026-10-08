@@ -1,5 +1,5 @@
 name: Bug Report
-description: Something in onIfy doesn't work the way it should
+description: Something in onify doesn't work the way it should
 labels: [bug]
 title: "[Bug] <title>"
 
@@ -12,7 +12,7 @@ body:
     - type: input
       id: version
       attributes:
-          label: onIfy version
+          label: onify version
           description: Preferences → Updates shows it
           placeholder: "0.1.1"
       validations:
@@ -41,7 +41,7 @@ body:
     - type: dropdown
       id: install
       attributes:
-          label: How did you install onIfy?
+          label: How did you install onify?
           options:
               - Windows installer
               - macOS app
@@ -77,7 +77,7 @@ body:
       attributes:
           label: Logs
           description: |
-              Start onIfy from a terminal with `RUST_LOG=onify=debug onify` and paste what it prints around the problem.
+              Start onify from a terminal with `RUST_LOG=onify=debug onify` and paste what it prints around the problem.
           render: shell
 
     - type: checkboxes
@@ -87,5 +87,5 @@ body:
           options:
               - label: I searched the existing issues and this isn't one of them
                 required: true
-              - label: I'm on the latest version of onIfy
+              - label: I'm on the latest version of onify
                 required: true

@@ -44,7 +44,7 @@ use player_bar::PlayerBar;
 
 pub const APP_ID: &str = "io.github.orqz.onIfy";
 const DISCORD_SERVER: &str = "https://discord.gg/WPKMx4gmwp";
-const REPO: &str = "https://github.com/orqz/onIfy";
+const REPO: &str = "https://github.com/orqz/onify";
 
 #[derive(Clone)]
 enum Route {
@@ -174,7 +174,7 @@ pub fn startup(_: &adw::Application) {
     adw::StyleManager::default().set_color_scheme(adw::ColorScheme::ForceDark);
     // Windows and macOS take the taskbar/dock icon from here.
     gtk::Window::set_default_icon_name(APP_ID);
-    // The sidebar already shows onIfy's logo; drop the second, smaller one
+    // The sidebar already shows onify's logo; drop the second, smaller one
     // some desktops add beside the window buttons.
     if let Some(settings) = gtk::Settings::default() {
         strip_window_icon(&settings);
@@ -184,8 +184,8 @@ pub fn startup(_: &adw::Application) {
     }
 }
 
-/// Windows hands GTK its 9pt menu font, while onIfy is laid out for 11pt
-/// (what Linux uses), and Segoe UI rendered badly through GTK; onIfy brings
+/// Windows hands GTK its 9pt menu font, while onify is laid out for 11pt
+/// (what Linux uses), and Segoe UI rendered badly through GTK; onify brings
 /// Adwaita Sans, the font libadwaita is drawn for (data/fonts).
 #[cfg(windows)]
 fn windows_fonts(settings: &gtk::Settings) {
@@ -241,7 +241,7 @@ pub fn activate(app: &adw::Application) {
 
     let window = adw::ApplicationWindow::builder()
         .application(app)
-        .title("onIfy")
+        .title("onify")
         .default_width(1280)
         .default_height(820)
         .width_request(300)
@@ -264,7 +264,7 @@ pub fn activate(app: &adw::Application) {
     nav.add(&search.page);
     nav.replace_with_tags(&["home"]);
     nav.set_margin_bottom(PLAYER_SPACE);
-    let content = adw::NavigationPage::builder().title("onIfy").child(&nav).build();
+    let content = adw::NavigationPage::builder().title("onify").child(&nav).build();
     let (sidebar_page, sidebar, sidebar_glass) = build_sidebar();
     let split = adw::NavigationSplitView::builder()
         .sidebar(&sidebar_page)
@@ -564,7 +564,7 @@ fn build_sidebar() -> (adw::NavigationPage, gtk::ListBox, Glass) {
     let main_section = gio::Menu::new();
     main_section.append(Some("Preferences"), Some("app.preferences"));
     main_section.append(Some("Join the Discord Server"), Some("app.discord"));
-    main_section.append(Some("About onIfy"), Some("app.about"));
+    main_section.append(Some("About onify"), Some("app.about"));
     menu.append_section(None, &main_section);
     let session_section = gio::Menu::new();
     session_section.append(Some("Log Out"), Some("app.logout"));
@@ -610,7 +610,7 @@ fn build_sidebar() -> (adw::NavigationPage, gtk::ListBox, Glass) {
     glass.set_overflow(gtk::Overflow::Hidden);
     glass.append(&toolbar);
     // No `.sidebar` class: libadwaita draws a divider line for it.
-    let page = adw::NavigationPage::builder().title("onIfy").child(&glass).build();
+    let page = adw::NavigationPage::builder().title("onify").child(&glass).build();
     (page, list, glass)
 }
 
@@ -676,7 +676,7 @@ pub fn apply_style(name: &str) {
     pages::set_vinyl(vinyl);
 }
 
-/// Off means onIfy's own animations and transitions are skipped; on follows
+/// Off means onify's own animations and transitions are skipped; on follows
 /// the system setting.
 pub fn set_animations(on: bool) {
     if let Some(settings) = gtk::Settings::default() {
@@ -1072,7 +1072,7 @@ fn handle_event(event: Event) {
         }
         Event::Paused { position_ms } => {
             ctx.bar.set_playing(false, position_ms);
-            ctx.window.set_title(Some("onIfy"));
+            ctx.window.set_title(Some("onify"));
             integrations::paused(position_ms);
             lyrics::resync();
             restart_if_stale();
@@ -1085,7 +1085,7 @@ fn handle_event(event: Event) {
         Event::Loading => {}
         Event::Stopped => {
             ctx.bar.stopped();
-            ctx.window.set_title(Some("onIfy"));
+            ctx.window.set_title(Some("onify"));
             integrations::paused(0);
             restart_if_stale();
         }
@@ -1133,7 +1133,7 @@ fn handle_event(event: Event) {
                     ctx.with_engine(|e| e.pause());
                     ctx.engine_stale.set(true);
                     restart_if_stale();
-                    toast("Spotify stopped sending songs, so onIfy reconnected. Press play to continue");
+                    toast("Spotify stopped sending songs, so onify reconnected. Press play to continue");
                 }
                 _ => {}
             }
@@ -1147,7 +1147,7 @@ fn handle_event(event: Event) {
         Event::NotPremium(generation) => {
             if generation == ctx.generation.get() {
                 logout();
-                show_login("onIfy needs Spotify Premium: Spotify only streams to other apps for Premium accounts.");
+                show_login("onify needs Spotify Premium: Spotify only streams to other apps for Premium accounts.");
             }
         }
     }
@@ -1185,7 +1185,7 @@ fn install_actions(app: &adw::Application) {
     action("quit", quit);
     action("about", || {
         let about = adw::AboutDialog::builder()
-            .application_name("onIfy")
+            .application_name("onify")
             .application_icon(APP_ID)
             .version(env!("ONIFY_VERSION"))
             .comments("A native Spotify client that stays smooth and light.")
@@ -1319,7 +1319,7 @@ pub fn raise() {
 
 /// Lets Spotify know this device is going away, then exits. Not through
 /// closing the window: with a dialog open (Preferences), libadwaita closes
-/// the dialog instead and onIfy would keep running (which stalled updates).
+/// the dialog instead and onify would keep running (which stalled updates).
 pub fn quit() {
     let ctx = ctx();
     ctx.generation.set(ctx.generation.get() + 1);

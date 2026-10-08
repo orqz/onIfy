@@ -90,7 +90,7 @@ fn visit_dir(dir: &Path, accumulator: &mut LocalFileLookup) -> io::Result<()> {
     Ok(())
 }
 
-/// Every URI the file answers to. onIfy: files without artist and title
+/// Every URI the file answers to. onify: files without artist and title
 /// tags also answer to names taken from the file name, "Artist - Title"
 /// when it reads like that, so they show up (and scrobble) as real songs.
 fn get_uris_from_file(audio_path: &Path, file_extension: &str) -> Result<Vec<SpotifyUri>, Error> {

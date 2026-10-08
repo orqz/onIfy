@@ -1,11 +1,11 @@
 #!/bin/sh
-# Lays out dist/onIfy: onify.exe plus the GTK DLLs and data it needs, in the
+# Lays out dist/onify: onify.exe plus the GTK DLLs and data it needs, in the
 # bin/ lib/ share/ shape GTK looks for next to its own DLLs on Windows. Run
 # from the repo root in an MSYS2 UCRT64 shell after `cargo build --release`;
-# onIfy.iss turns the folder into an installer.
+# onify.iss turns the folder into an installer.
 set -eu
 
-out=dist/onIfy
+out=dist/onify
 rm -rf "$out"
 mkdir -p "$out/bin" "$out/lib" "$out/share/glib-2.0/schemas" "$out/share/icons"
 cp target/release/onify.exe "$out/bin/"
@@ -28,7 +28,7 @@ for file in "$out/bin/onify.exe" "$loaders"/loaders/*.dll; do
 done
 
 cp "$MINGW_PREFIX/share/glib-2.0/schemas/gschemas.compiled" "$out/share/glib-2.0/schemas/"
-# onIfy's UI font (Windows has no Adwaita Sans; see windows_fonts in ui/mod.rs).
+# onify's UI font (Windows has no Adwaita Sans; see windows_fonts in ui/mod.rs).
 mkdir -p "$out/share/onify/fonts"
 cp data/fonts/* "$out/share/onify/fonts/"
 # GTK's own widgets (search field, spinners, window buttons) use these icons.

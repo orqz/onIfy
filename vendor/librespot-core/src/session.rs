@@ -363,7 +363,7 @@ impl Session {
     fn check_catalogue(attributes: &UserAttributes) {
         if let Some(account_type) = attributes.get("type") {
             if account_type != "premium" {
-                // onIfy: no exit(1) here; the app reads the "type" attribute
+                // onify: no exit(1) here; the app reads the "type" attribute
                 // and sends the user back to its login page instead.
                 error!("librespot does not support {account_type:?} accounts.");
             }

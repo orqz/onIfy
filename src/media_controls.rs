@@ -32,7 +32,7 @@ pub fn start(window: &gtk::Window) {
     };
     let config = PlatformConfig {
         dbus_name: "onify",
-        display_name: "onIfy",
+        display_name: "onify",
         hwnd,
     };
     let mut controls = match MediaControls::new(config) {

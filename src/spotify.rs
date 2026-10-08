@@ -90,7 +90,7 @@ pub fn login_in_browser() -> Result<Credentials, Error> {
     let client_id = SessionConfig::default().client_id;
     let token = OAuthClientBuilder::new(&client_id, OAUTH_REDIRECT, OAUTH_SCOPES.to_vec())
         .open_in_browser()
-        .with_custom_message("onIfy is logged in. You can close this tab.")
+        .with_custom_message("onify is logged in. You can close this tab.")
         .build()
         .and_then(|client| client.get_access_token())
         .map_err(Error::unauthenticated)?;
@@ -291,7 +291,7 @@ impl Engine {
 
         let mixer = output.mixer();
         let connect_config = ConnectConfig {
-            name: "onIfy".into(),
+            name: "onify".into(),
             device_type: DeviceType::Computer,
             initial_volume: mixer.volume(),
             ..ConnectConfig::default()
@@ -324,7 +324,7 @@ impl Engine {
             for _ in 0..100 {
                 if let Some(kind) = session.get_user_attribute("type") {
                     if kind != "premium" {
-                        log::warn!("{kind} account; onIfy needs Premium");
+                        log::warn!("{kind} account; onify needs Premium");
                         let _ = refused.send(Event::NotPremium(generation));
                     }
                     return;

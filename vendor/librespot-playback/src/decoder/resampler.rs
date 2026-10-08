@@ -1,5 +1,5 @@
 //! Streaming windowed-sinc resampler, so local files recorded at any sample
-//! rate play through the 44.1 kHz pipeline. Added by onIfy.
+//! rate play through the 44.1 kHz pipeline. Added by onify.
 
 use std::f64::consts::PI;
 

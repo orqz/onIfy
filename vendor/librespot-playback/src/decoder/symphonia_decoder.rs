@@ -19,9 +19,9 @@ pub struct SymphoniaDecoder {
     probe_result: ProbeResult,
     decoder: Box<dyn Decoder>,
     sample_buffer: Option<SampleBuffer<f64>>,
-    /// Local files not at 44.1 kHz are converted on the fly (onIfy).
+    /// Local files not at 44.1 kHz are converted on the fly (onify).
     resampler: Option<Resampler>,
-    /// Mono local files play on both channels (onIfy).
+    /// Mono local files play on both channels (onify).
     upmix_mono: bool,
 }
 
@@ -69,7 +69,7 @@ impl SymphoniaDecoder {
             DecoderError::SymphoniaDecoder("Could not retrieve sample rate".into())
         })?;
 
-        // Like the official client, play local files at any sample rate (onIfy).
+        // Like the official client, play local files at any sample rate (onify).
         let resampler = (rate != SAMPLE_RATE).then(|| {
             info!("Resampling from {rate} Hz to {SAMPLE_RATE} Hz");
             Resampler::new(rate, SAMPLE_RATE)

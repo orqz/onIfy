@@ -1,13 +1,13 @@
 //! Updates from the GitHub releases.
 //!
 //! How a new version gets installed depends on how this one was:
-//! - a Flatpak: Flatpak updates it, so onIfy doesn't check at all;
+//! - a Flatpak: Flatpak updates it, so onify doesn't check at all;
 //! - a distro package (pacman/yay, anything under /usr): the package manager
-//!   updates it, so onIfy only says a new version is out;
-//! - an AppImage: the file is swapped for the new one, then onIfy restarts;
-//! - the Windows installer: the new installer runs silently and starts onIfy
+//!   updates it, so onify only says a new version is out;
+//! - an AppImage: the file is swapped for the new one, then onify restarts;
+//! - the Windows installer: the new installer runs silently and starts onify
 //!   again when it's done;
-//! - onIfy.app on a Mac: the new .dmg's app replaces this one, then reopens.
+//! - onify.app on a Mac: the new .dmg's app replaces this one, then reopens.
 //!
 //! Everything is fetched over HTTPS from github.com; the downloaded size must
 //! match what the release lists.
@@ -19,7 +19,7 @@ use http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
 use librespot_core::http_client::HttpClient;
 
-const REPO: &str = "orqz/onIfy";
+const REPO: &str = "orqz/onify";
 const CURRENT: &str = env!("ONIFY_VERSION");
 
 pub struct Release {
@@ -31,7 +31,7 @@ pub struct Release {
     asset: Option<(String, String, u64)>,
 }
 
-/// How this copy of onIfy was installed (see the module docs).
+/// How this copy of onify was installed (see the module docs).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Install {
     Flatpak,
@@ -41,12 +41,12 @@ pub enum Install {
     WindowsInstaller,
     MacApp(PathBuf),
     /// Built from source (install.sh), a development build, or somewhere
-    /// onIfy can't update itself: it only says a new version is out.
+    /// onify can't update itself: it only says a new version is out.
     Manual,
 }
 
 impl Install {
-    /// Whether onIfy can install the update itself.
+    /// Whether onify can install the update itself.
     pub fn automatic(&self) -> bool {
         !matches!(self, Install::Flatpak | Install::Package | Install::Manual)
     }
@@ -63,7 +63,7 @@ impl Install {
 }
 
 impl Release {
-    /// Whether this release has a file onIfy can install for `install`.
+    /// Whether this release has a file onify can install for `install`.
     pub fn installable(&self, install: &Install) -> bool {
         install.automatic() && self.asset.is_some()
     }
@@ -97,7 +97,7 @@ pub fn install() -> Install {
         return if installed { Install::WindowsInstaller } else { Install::Manual };
     }
     if cfg!(target_os = "macos") {
-        // onIfy.app/Contents/MacOS/onify
+        // onify.app/Contents/MacOS/onify
         let bundle = exe.ancestors().nth(3).map(Path::to_path_buf);
         return match bundle {
             Some(b) if b.extension().is_some_and(|e| e == "app") && writable(b.parent()) => Install::MacApp(b),
@@ -184,7 +184,7 @@ async fn get(url: &str, accept: Option<&str>) -> Result<Bytes, String> {
 }
 
 /// Downloads the release and puts it in place. Afterwards the caller quits
-/// onIfy; what's started here finishes the job and opens the new version.
+/// onify; what's started here finishes the job and opens the new version.
 pub async fn install_release(release: &Release, install: &Install) -> Result<(), String> {
     let Some((name, url, size)) = &release.asset else {
         return Err("this release has no download for this system".into());
@@ -197,7 +197,7 @@ pub async fn install_release(release: &Release, install: &Install) -> Result<(),
         Install::File(target) => replace_file(target, &data),
         Install::WindowsInstaller => run_installer(name, &data),
         Install::MacApp(bundle) => replace_app(bundle, &data),
-        Install::Flatpak | Install::Package | Install::Manual => Err("onIfy can't update itself here".into()),
+        Install::Flatpak | Install::Package | Install::Manual => Err("onify can't update itself here".into()),
     }
 }
 
@@ -221,15 +221,16 @@ pub fn clean_up_installers() {
     let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else { return };
     for entry in entries.flatten() {
         let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if name.starts_with("onIfy-setup") && name.ends_with(".exe") {
+        // Installers from before the rename were named onIfy-setup-….
+        let name = name.to_string_lossy().to_ascii_lowercase();
+        if name.starts_with("onify-setup") && name.ends_with(".exe") {
             let _ = std::fs::remove_file(entry.path());
         }
     }
 }
 
-/// The installer replaces onIfy once it has quit, then starts it again (see
-/// the [Run] section of packaging/windows/onIfy.iss).
+/// The installer replaces onify once it has quit, then starts it again (see
+/// the [Run] section of packaging/windows/onify.iss).
 fn run_installer(name: &str, data: &[u8]) -> Result<(), String> {
     let setup = std::env::temp_dir().join(name);
     std::fs::write(&setup, data).map_err(|e| e.to_string())?;
@@ -240,16 +241,16 @@ fn run_installer(name: &str, data: &[u8]) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-/// Mounts the new .dmg once onIfy has quit, copies its app over this one
+/// Mounts the new .dmg once onify has quit, copies its app over this one
 /// (keeping the old one until the copy worked) and opens it.
 fn replace_app(bundle: &Path, data: &[u8]) -> Result<(), String> {
-    let dmg = std::env::temp_dir().join("onIfy-update.dmg");
+    let dmg = std::env::temp_dir().join("onify-update.dmg");
     std::fs::write(&dmg, data).map_err(|e| e.to_string())?;
     let script = r#"
         mnt=$(mktemp -d) || exit 1
         hdiutil attach -nobrowse -quiet -mountpoint "$mnt" "$2" || exit 1
         rm -rf "$3.old" && mv "$3" "$3.old" &&
-            { ditto "$mnt/onIfy.app" "$3" && rm -rf "$3.old" || mv "$3.old" "$3"; }
+            { ditto "$(ls -d "$mnt"/*.app | head -n 1)" "$3" && rm -rf "$3.old" || mv "$3.old" "$3"; }
         hdiutil detach -quiet "$mnt"
         rm -f "$2"
         open "$3"

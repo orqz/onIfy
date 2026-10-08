@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=onIfy
+Name=onify
 GenericName=Music Player
 Comment=A smooth, lightweight Spotify client
 Exec=onify %U

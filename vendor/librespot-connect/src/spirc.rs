@@ -1644,7 +1644,7 @@ impl SpircTask {
         // Over 3s it seeks to zero (retains previous play status)
         if self.position() < 3000 {
             match self.connect_state.prev_track()? {
-                // onIfy: nothing played before this song (the first one after
+                // onify: nothing played before this song (the first one after
                 // starting a playlist, always the case when shuffled): start
                 // it over like Spotify's apps do, instead of stopping.
                 None => {

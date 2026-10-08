@@ -104,7 +104,7 @@ fn window_group() -> adw::PreferencesGroup {
 fn performance_group() -> adw::PreferencesGroup {
     let group = adw::PreferencesGroup::builder()
         .title("Performance")
-        .description("onIfy is light already; these make it lighter still.")
+        .description("onify is light already; these make it lighter still.")
         .build();
     let settings = ctx().settings.borrow().clone_switches();
     group.add(&switch("Animations", "Fades, slides and button effects", settings.0, |on| {
@@ -214,7 +214,7 @@ fn change_folders(change: impl FnOnce(&mut Vec<PathBuf>)) {
 fn updates_group() -> adw::PreferencesGroup {
     let group = adw::PreferencesGroup::builder()
         .title("Updates")
-        .description(format!("This is onIfy {}.", crate::update::current()))
+        .description(format!("This is onify {}.", crate::update::current()))
         .build();
     let active = ctx().settings.borrow().check_updates;
     group.add(&switch("Check for Updates", "Asks before installing anything", active, |on| {

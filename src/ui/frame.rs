@@ -1,9 +1,9 @@
-//! Windows: onIfy draws its own title bar (the page headers), so Windows sees
+//! Windows: onify draws its own title bar (the page headers), so Windows sees
 //! a borderless window, and borderless windows don't snap when dragged to the
 //! screen's top or sides, don't animate opening, closing and minimising, and
 //! get no Snap Layouts on the maximise button. This gives the window a normal
 //! Windows frame, hides it (WM_NCCALCSIZE), and tells Windows which parts of
-//! onIfy are its title bar and its maximise button (WM_NCHITTEST), so moving,
+//! onify are its title bar and its maximise button (WM_NCHITTEST), so moving,
 //! snapping and resizing are Windows' own.
 //!
 //! GTK sizes the window as if the frame showed (and, should it take the frame
@@ -67,7 +67,7 @@ thread_local! {
     /// shown by hand.
     static MAX_BUTTON: RefCell<Option<gtk::Widget>> = const { RefCell::new(None) };
     static MAX_PRESSED: Cell<bool> = const { Cell::new(false) };
-    /// The title bar part the pointer was last over (0: onIfy's own area).
+    /// The title bar part the pointer was last over (0: onify's own area).
     static NC_PART: Cell<u32> = const { Cell::new(0) };
 }
 
@@ -111,7 +111,7 @@ pub fn install(window: &gtk::Window) {
             0,
             SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
         );
-        // Marks the window for a second onIfy to find (hand_over_to_running).
+        // Marks the window for a second onify to find (hand_over_to_running).
         SetPropW(hwnd, wide(&id).as_ptr(), std::ptr::without_provenance_mut(1));
     }
 }
@@ -155,7 +155,7 @@ fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
-/// Sent by a second onIfy to the running one: show yourself.
+/// Sent by a second onify to the running one: show yourself.
 fn show_message() -> u32 {
     thread_local! {
         static MESSAGE: u32 = unsafe { RegisterWindowMessageW(wide("io.github.orqz.onIfy.show").as_ptr()) };
@@ -163,12 +163,12 @@ fn show_message() -> u32 {
     MESSAGE.with(|m| *m)
 }
 
-/// Windows has no session bus for GTK to keep onIfy to one copy. When one is
+/// Windows has no session bus for GTK to keep onify to one copy. When one is
 /// already running, this brings it forward and returns true; the caller then
 /// exits.
 pub fn hand_over_to_running(app_id: &str) -> bool {
     unsafe {
-        // Held until onIfy exits.
+        // Held until onify exits.
         let name = wide(&format!("Local\\{app_id}"));
         CreateMutexW(std::ptr::null(), 0, name.as_ptr());
         if GetLastError() != ERROR_ALREADY_EXISTS {
@@ -205,7 +205,7 @@ unsafe extern "system" fn find_marked(hwnd: HWND, lparam: LPARAM) -> i32 {
 unsafe extern "system" fn subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _: usize, _: usize) -> LRESULT {
     unsafe {
         match msg {
-            // All of the window is onIfy's; maximised, Windows makes it a bit
+            // All of the window is onify's; maximised, Windows makes it a bit
             // bigger than the screen (for the hidden frame), so keep to it.
             WM_NCCALCSIZE => {
                 if wparam != 0 && IsZoomed(hwnd) != 0 {

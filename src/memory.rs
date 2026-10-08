@@ -1,4 +1,4 @@
-//! Keeps glibc's allocator from hoarding memory onIfy has already freed.
+//! Keeps glibc's allocator from hoarding memory onify has already freed.
 //!
 //! glibc gives each thread that allocates its own arena and rarely hands freed
 //! pages back, so a burst of work (a page of tracks, a screenful of covers)
@@ -14,7 +14,7 @@ use std::time::Duration;
 pub fn init() {
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     unsafe {
-        // Two arenas are plenty for onIfy's few busy threads.
+        // Two arenas are plenty for onify's few busy threads.
         libc::mallopt(libc::M_ARENA_MAX, 2);
         libc::mallopt(libc::M_TRIM_THRESHOLD, 1 << 20);
     }

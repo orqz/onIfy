@@ -1,4 +1,4 @@
-//! MPRIS, so media keys, playerctl and desktop widgets control onIfy.
+//! MPRIS, so media keys, playerctl and desktop widgets control onify.
 
 use std::rc::Rc;
 
@@ -8,7 +8,7 @@ use crate::ui::{self, ctx};
 
 pub async fn start() -> Option<Rc<Player>> {
     let player = Player::builder("onify")
-        .identity("onIfy")
+        .identity("onify")
         .desktop_entry(ui::APP_ID)
         .can_play(true)
         .can_pause(true)

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Packs target/release/onify into dist/onIfy-x86_64.AppImage with the GTK it
+# Packs target/release/onify into dist/onify-x86_64.AppImage with the GTK it
 # was built against. Run from the repo root after `cargo build --release`.
 #
 # GTK 4.20 and libadwaita 1.8 are newer than most distros ship, so they go in
@@ -47,9 +47,9 @@ linuxdeploy --appdir "$appdir" \
     --plugin gtk
 
 # The GTK plugin forces X11 (blurry under scaling on Wayland) and a plain
-# Adwaita theme over libadwaita's; onIfy wants neither.
+# Adwaita theme over libadwaita's; onify wants neither.
 sed -i -e '/^export GDK_BACKEND=/d' -e '/^export GTK_THEME=/d' "$appdir/apprun-hooks/linuxdeploy-plugin-gtk.sh"
 
-LDAI_OUTPUT=dist/onIfy-x86_64.AppImage OUTPUT=dist/onIfy-x86_64.AppImage \
+LDAI_OUTPUT=dist/onify-x86_64.AppImage OUTPUT=dist/onify-x86_64.AppImage \
     linuxdeploy --appdir "$appdir" --output appimage
-ls -lh dist/onIfy-x86_64.AppImage
+ls -lh dist/onify-x86_64.AppImage

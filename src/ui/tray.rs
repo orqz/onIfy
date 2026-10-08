@@ -1,4 +1,4 @@
-//! Windows: onIfy's icon next to the clock. Closing the window leaves onIfy
+//! Windows: onify's icon next to the clock. Closing the window leaves onify
 //! playing there (Preferences can turn that off); clicking the icon brings
 //! the window back, right-clicking it has play/pause, next, previous and quit.
 
@@ -37,8 +37,8 @@ pub fn start() {
     let play = MenuItem::new("Play", true, None);
     let next = MenuItem::new("Next", true, None);
     let previous = MenuItem::new("Previous", true, None);
-    let show = MenuItem::new("Show onIfy", true, None);
-    let quit = MenuItem::new("Quit onIfy", true, None);
+    let show = MenuItem::new("Show onify", true, None);
+    let quit = MenuItem::new("Quit onify", true, None);
     let menu = Menu::new();
     let separator = PredefinedMenuItem::separator();
     if let Err(e) = menu.append_items(&[&play, &next, &previous, &separator, &show, &quit]) {
@@ -53,7 +53,7 @@ pub fn start() {
         .with_menu(Box::new(menu))
         .with_menu_on_left_click(false)
         .with_icon(image)
-        .with_tooltip("onIfy")
+        .with_tooltip("onify")
         .build();
     let icon = match built {
         Ok(icon) => icon,
@@ -128,7 +128,7 @@ pub fn set_playing(playing: bool) {
     });
 }
 
-/// The installer puts onIfy's .ico next to bin\, sharp at every tray size; a
+/// The installer puts onify's .ico next to bin\, sharp at every tray size; a
 /// copy run from the source tree draws its logo instead.
 fn icon() -> Option<Icon> {
     let installed = std::env::current_exe().ok().and_then(|exe| Some(exe.parent()?.parent()?.join("onify.ico")));

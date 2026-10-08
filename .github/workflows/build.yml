@@ -14,11 +14,11 @@ concurrency:
 permissions:
     contents: read
 
-# onIfy needs GTK 4.20 and libadwaita 1.8, newer than Ubuntu ships: Linux
+# onify needs GTK 4.20 and libadwaita 1.8, newer than Ubuntu ships: Linux
 # builds the Flatpak on the GNOME 49 runtime, Windows and macOS against
 # MSYS2's and Homebrew's GTK.
 #
-# Each job packages onIfy the way people install it (Flatpak, installer,
+# Each job packages onify the way people install it (Flatpak, installer,
 # .app). Windows and macOS then smoke-test the package: it must still be
 # running 20 s after launch, on a machine without that GTK installed where
 # possible. A screenshot of that run is uploaded next to the package. Uploads expire
@@ -45,7 +45,7 @@ jobs:
             - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
               with:
                   manifest-path: packaging/flatpak/io.github.orqz.onIfy.yml
-                  bundle: onIfy-x86_64.flatpak
+                  bundle: onify-x86_64.flatpak
                   cache-key: flatpak-builder-${{ hashFiles('Cargo.lock') }}
                   upload-artifact: false
 
@@ -61,7 +61,7 @@ jobs:
                   gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
                       gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft \
                           --title "${GITHUB_REF_NAME#v}" --notes-file "$notes" || true
-                  gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber onIfy-x86_64.flatpak
+                  gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber onify-x86_64.flatpak
 
     windows:
         name: Windows
@@ -102,7 +102,7 @@ jobs:
                   $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"').Matches[0].Groups[1].Value
                   # a.b.c+d in Cargo.toml is release a.b.c.d (see build.rs)
                   $version = if ($version -match '\+') { $version -replace '\+', '.' } else { "$version.0" }
-                  & $iscc "/DAppVersion=$version" packaging\windows\onIfy.iss
+                  & $iscc "/DAppVersion=$version" packaging\windows\onify.iss
                   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
             # Plain PowerShell has no MSYS2 on its PATH, so a missing DLL in
@@ -110,14 +110,14 @@ jobs:
             - name: Smoke test
               shell: pwsh
               run: |
-                  $app = Start-Process -FilePath dist\onIfy\bin\onify.exe -PassThru
+                  $app = Start-Process -FilePath dist\onify\bin\onify.exe -PassThru
                   Start-Sleep -Seconds 20
                   Add-Type -AssemblyName System.Windows.Forms, System.Drawing
                   $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
                   $shot = New-Object System.Drawing.Bitmap $screen.Width, $screen.Height
                   [System.Drawing.Graphics]::FromImage($shot).CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
                   $shot.Save("$PWD\dist\screenshot-windows.png")
-                  if ($app.HasExited) { Write-Error "onIfy quit on its own (exit code $($app.ExitCode))"; exit 1 }
+                  if ($app.HasExited) { Write-Error "onify quit on its own (exit code $($app.ExitCode))"; exit 1 }
                   Stop-Process -Id $app.Id
 
             - name: Attach to the release
@@ -132,13 +132,13 @@ jobs:
                   gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
                       gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft \
                           --title "${GITHUB_REF_NAME#v}" --notes-file "$notes" || true
-                  gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber dist/onIfy-setup-x86_64.exe
+                  gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber dist/onify-setup-x86_64.exe
 
             - uses: actions/upload-artifact@v4
               continue-on-error: true
               with:
-                  name: onIfy-windows-x86_64-setup
-                  path: dist/onIfy-setup-x86_64.exe
+                  name: onify-windows-x86_64-setup
+                  path: dist/onify-setup-x86_64.exe
                   retention-days: 7
 
             - uses: actions/upload-artifact@v4
@@ -166,17 +166,17 @@ jobs:
 
             - run: cargo build --release --locked
 
-            - name: Bundle onIfy.app
+            - name: Bundle onify.app
               run: packaging/macos/bundle.sh
 
             # bundle.sh already fails if anything still links into Homebrew.
             - name: Smoke test
               run: |
-                  dist/onIfy.app/Contents/MacOS/onify &
+                  dist/onify.app/Contents/MacOS/onify &
                   pid=$!
                   sleep 20
                   screencapture -x dist/screenshot-macos.png || true
-                  kill -0 $pid || { echo "onIfy quit on its own"; exit 1; }
+                  kill -0 $pid || { echo "onify quit on its own"; exit 1; }
                   kill $pid
 
             - name: Attach to the release
@@ -190,13 +190,13 @@ jobs:
                   gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 ||
                       gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft \
                           --title "${GITHUB_REF_NAME#v}" --notes-file "$notes" || true
-                  gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber dist/onIfy-macos-arm64.dmg
+                  gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber dist/onify-macos-arm64.dmg
 
             - uses: actions/upload-artifact@v4
               continue-on-error: true
               with:
-                  name: onIfy-macos-arm64
-                  path: dist/onIfy-macos-arm64.dmg
+                  name: onify-macos-arm64
+                  path: dist/onify-macos-arm64.dmg
                   retention-days: 7
 
             - uses: actions/upload-artifact@v4
