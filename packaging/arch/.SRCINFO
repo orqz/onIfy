@@ -1,6 +1,6 @@
 pkgbase = onify
 	pkgdesc = A smooth, lightweight Spotify client (needs Spotify Premium)
-	pkgver = 0.1.3.3
+	pkgver = 0.1.3.2
 	pkgrel = 1
 	url = https://github.com/orqz/onify
 	arch = x86_64
@@ -18,7 +18,7 @@ pkgbase = onify
 	depends = libgcc
 	depends = glibc
 	depends = hicolor-icon-theme
-	source = onify::git+https://github.com/orqz/onify.git#tag=v0.1.3.3
+	source = onify::git+https://github.com/orqz/onify.git#tag=v0.1.3.2
 	sha256sums = SKIP
 
 pkgname = onify
