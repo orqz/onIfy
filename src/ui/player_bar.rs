@@ -10,7 +10,7 @@ use std::rc::{Rc, Weak};
 use std::time::Duration;
 
 use adw::prelude::*;
-use gtk::{gdk, glib};
+use gtk::{gdk, gio, glib};
 
 use super::cover::Cover;
 use super::glass::Glass;
@@ -47,6 +47,8 @@ pub struct PlayerBar {
     cover: Cover,
     title: gtk::Label,
     artists: gtk::Label,
+    /// The playing song's menu (right-click its title or artists).
+    song_menu: gtk::PopoverMenu,
     /// Title and artists; fades in with each new song, like the cover.
     text: gtk::Box,
     text_fade: RefCell<Option<adw::TimedAnimation>>,
@@ -137,6 +139,9 @@ impl PlayerBar {
         artists.add_css_class("now-artists");
         text.append(&title);
         text.append(&artists);
+        let song_menu = gtk::PopoverMenu::from_model(None::<&gio::MenuModel>);
+        song_menu.set_parent(&text);
+        song_menu.set_has_arrow(false);
         let like = icon_button("onify-heart-symbolic", "Save to Liked Songs");
         like.set_visible(false);
         side_start.append(&cover);
@@ -217,6 +222,7 @@ impl PlayerBar {
             cover,
             title,
             artists,
+            song_menu,
             text: text.clone(),
             text_fade: RefCell::default(),
             shuffle,
@@ -293,10 +299,28 @@ impl PlayerBar {
             open();
             glib::Propagation::Stop
         });
-        self.artists.connect_activate_link(|_, uri| {
-            super::open_uri(uri);
+        self.artists.connect_activate_link(|_, link| {
+            if let Some(uri) = super::uri_of_link(link) {
+                super::open_uri(&uri);
+            }
             glib::Propagation::Stop
         });
+        // Right-click: the song's menu, ahead of GTK's text menu for links.
+        let menu = gtk::GestureClick::builder()
+            .button(gdk::BUTTON_SECONDARY)
+            .propagation_phase(gtk::PropagationPhase::Capture)
+            .build();
+        menu.connect_pressed(glib::clone!(
+            #[weak(rename_to = popover)]
+            self.song_menu,
+            move |gesture, _, x, y| {
+                let Some(now) = ctx().now.borrow().clone() else { return };
+                gesture.set_state(gtk::EventSequenceState::Claimed);
+                let menu = super::track_row::song_menu(&now.uri, None, &now.artists, false);
+                super::track_row::popup_menu(&popover, &menu, x, y);
+            }
+        ));
+        self.text.add_controller(menu);
 
         // Seeking: follow the knob while it's held, seek once on release.
         let legacy = gtk::EventControllerLegacy::new();
@@ -526,10 +550,15 @@ impl PlayerBar {
             st.at = now_us();
         }
         self.cover.set_url(now.cover(112));
-        self.title.set_markup(&format!(
-            "<a href=\"album\">{}</a>",
-            glib::markup_escape_text(&now.name)
-        ));
+        // The title opens its album; the link itself is the song's, so
+        // copying it shares the song.
+        let name = glib::markup_escape_text(&now.name);
+        if now.uri.starts_with("spotify:track:") {
+            let link = super::track_row::web_link(&now.uri);
+            self.title.set_markup(&format!("<a href=\"{}\">{name}</a>", glib::markup_escape_text(&link)));
+        } else {
+            self.title.set_markup(&name);
+        }
         self.title.set_tooltip_text(Some(&now.name));
         let artists: Vec<String> = now
             .artists
@@ -539,7 +568,7 @@ impl PlayerBar {
                 if a.uri.is_empty() {
                     name.to_string()
                 } else {
-                    format!("<a href=\"{}\">{name}</a>", glib::markup_escape_text(&a.uri))
+                    format!("<a href=\"{}\">{name}</a>", glib::markup_escape_text(&super::track_row::web_link(&a.uri)))
                 }
             })
             .collect();

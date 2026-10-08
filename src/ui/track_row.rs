@@ -7,7 +7,7 @@ use gtk::subclass::prelude::*;
 use gtk::{gdk, gio, glib};
 
 use super::cover::Cover;
-use crate::api::{Track, id_of};
+use crate::api::Track;
 
 const LEAD_WIDTH: i32 = 32;
 const COVER: i32 = 44;
@@ -155,19 +155,64 @@ pub fn artist_links(artists: &[crate::api::Named]) -> String {
             if a.uri.is_empty() {
                 name.to_string()
             } else {
-                format!("<a href=\"{}\">{name}</a>", glib::markup_escape_text(&a.uri))
+                format!("<a href=\"{}\">{name}</a>", glib::markup_escape_text(&web_link(&a.uri)))
             }
         })
         .collect::<Vec<_>>()
         .join(", ")
 }
 
+/// The open.spotify.com address of a `spotify:kind:id` uri. Links carry
+/// these, so GTK's "Copy Link Address" gives something you can share.
+pub fn web_link(uri: &str) -> String {
+    match uri.strip_prefix("spotify:").and_then(|rest| rest.split_once(':')) {
+        Some((kind, id)) => format!("https://open.spotify.com/{kind}/{id}"),
+        None => uri.to_owned(),
+    }
+}
+
 /// Clicking a link in `label` opens that page in onIfy.
 pub fn open_links(label: &gtk::Label) {
-    label.connect_activate_link(|_, uri| {
-        super::open_uri(uri);
+    label.connect_activate_link(|_, link| {
+        if let Some(uri) = super::uri_of_link(link) {
+            super::open_uri(&uri);
+        }
         glib::Propagation::Stop
     });
+}
+
+/// A song's menu, wherever it's right-clicked. Without the album's uri,
+/// "Go to Album" looks it up from the song.
+pub fn song_menu(uri: &str, album: Option<&str>, artists: &[crate::api::Named], queue: bool) -> gio::Menu {
+    let menu = gio::Menu::new();
+    let add = |label: &str, action: &str, target: &str| {
+        let item = gio::MenuItem::new(Some(label), None);
+        item.set_action_and_target_value(Some(action), Some(&target.to_variant()));
+        menu.append_item(&item);
+    };
+    let spotify_track = uri.starts_with("spotify:track:");
+    if queue {
+        add("Add to Queue", "app.queue", uri);
+    }
+    match album.filter(|a| !a.is_empty()) {
+        Some(album) => add("Go to Album", "app.open", album),
+        None if spotify_track => add("Go to Album", "app.album-of", uri),
+        None => {}
+    }
+    for artist in artists.iter().filter(|a| !a.uri.is_empty()).take(3) {
+        add(&format!("Go to {}", artist.name), "app.open", &artist.uri);
+    }
+    if spotify_track {
+        add("Copy Song Link", "app.copy-text", &web_link(uri));
+    }
+    menu
+}
+
+/// Opens `menu` from `popover`, pointing at (x, y) in its parent.
+pub fn popup_menu(popover: &gtk::PopoverMenu, menu: &gio::Menu, x: f64, y: f64) {
+    popover.set_menu_model(Some(menu));
+    popover.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+    popover.popup();
 }
 
 fn dim(label: &gtk::Label) -> &gtk::Label {
@@ -336,7 +381,12 @@ impl TrackRow {
         });
         row.add_controller(hover);
 
-        let click = gtk::GestureClick::builder().button(gdk::BUTTON_SECONDARY).build();
+        // Before the row's labels: an artist link would open GTK's own text
+        // menu (cut, copy, paste) instead of the song's.
+        let click = gtk::GestureClick::builder()
+            .button(gdk::BUTTON_SECONDARY)
+            .propagation_phase(gtk::PropagationPhase::Capture)
+            .build();
         click.connect_pressed(glib::clone!(
             #[weak]
             row,
@@ -425,27 +475,7 @@ impl TrackRow {
 
     fn show_menu(&self, x: f64, y: f64) {
         let Some(track) = self.track() else { return };
-        let menu = gio::Menu::new();
-        let add = |label: &str, action: &str, target: &str| {
-            let item = gio::MenuItem::new(Some(label), None);
-            item.set_action_and_target_value(Some(action), Some(&target.to_variant()));
-            menu.append_item(&item);
-        };
-        add("Add to Queue", "app.queue", &track.uri);
-        if !track.album.uri.is_empty() {
-            add("Go to Album", "app.open", &track.album.uri);
-        }
-        for artist in track.artists.iter().filter(|a| !a.uri.is_empty()).take(3) {
-            add(&format!("Go to {}", artist.name), "app.open", &artist.uri);
-        }
-        if track.uri.starts_with("spotify:track:") {
-            add(
-                "Copy Song Link",
-                "app.copy-text",
-                &format!("https://open.spotify.com/track/{}", id_of(&track.uri)),
-            );
-        }
-
+        let menu = song_menu(&track.uri, Some(&track.album.uri), &track.artists, true);
         let popover = self.imp().menu.get_or_init(|| {
             let popover = gtk::PopoverMenu::from_model(None::<&gio::MenuModel>);
             popover.set_parent(self);
@@ -453,9 +483,7 @@ impl TrackRow {
             popover.set_halign(gtk::Align::Start);
             popover
         });
-        popover.set_menu_model(Some(&menu));
-        popover.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
-        popover.popup();
+        popup_menu(popover, &menu, x, y);
     }
 }
 
@@ -636,4 +664,20 @@ pub fn short_list(tracks: &[Track], mode: RowMode, on_activate: impl Fn(usize) +
         }
     });
     list
+}
+
+#[cfg(test)]
+mod tests {
+    use super::web_link;
+    use crate::ui::uri_of_link;
+
+    #[test]
+    fn links() {
+        assert_eq!(web_link("spotify:track:4uLU6hMCjMI75M1A2tKUQC"), "https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC");
+        assert_eq!(web_link("spotify:artist:0hCNtLu0JehylgoiP8L4Gh"), "https://open.spotify.com/artist/0hCNtLu0JehylgoiP8L4Gh");
+        for uri in ["spotify:artist:0hCNtLu0JehylgoiP8L4Gh", "spotify:album:2noRn2Aes5aoNVsU6iWThc"] {
+            assert_eq!(uri_of_link(&web_link(uri)).as_deref(), Some(uri));
+        }
+        assert_eq!(uri_of_link("https://open.spotify.com/intl-de/track/abc?si=x").as_deref(), Some("spotify:track:abc"));
+    }
 }

@@ -1211,6 +1211,7 @@ fn install_actions(app: &adw::Application) {
         app.add_action(&a);
     };
     with_string("open", open_uri);
+    with_string("album-of", open_album_of);
     // Developer aid: with ONIFY_DEV set, `app.dev-render` saves the window as a
     // PNG at 2x, even while it's on another workspace.
     if std::env::var_os("ONIFY_DEV").is_some() {
@@ -1348,19 +1349,23 @@ pub fn open_links(app: &adw::Application, files: &[gio::File], _hint: &str) {
     }
 }
 
+/// `spotify:kind:id` for `https://open.spotify.com/[intl-xx/]kind/id`;
+/// anything else as it is.
+pub fn uri_of_link(link: &str) -> Option<String> {
+    let Some(path) = link.strip_prefix("https://open.spotify.com/") else {
+        return Some(link.to_owned());
+    };
+    let path = path.split(['?', '#']).next().unwrap_or_default();
+    let parts: Vec<&str> = path.split('/').filter(|p| !p.starts_with("intl-")).collect();
+    match parts.as_slice() {
+        [kind, id, ..] => Some(format!("spotify:{kind}:{id}")),
+        _ => None,
+    }
+}
+
 /// Opens `spotify:kind:id` or `https://open.spotify.com/[intl-xx/]kind/id`.
 fn open_link(link: &str) {
-    let uri = match link.strip_prefix("https://open.spotify.com/") {
-        Some(path) => {
-            let path = path.split(['?', '#']).next().unwrap_or_default();
-            let parts: Vec<&str> = path.split('/').filter(|p| !p.starts_with("intl-")).collect();
-            match parts.as_slice() {
-                [kind, id, ..] => format!("spotify:{kind}:{id}"),
-                _ => return,
-            }
-        }
-        None => link.to_owned(),
-    };
+    let Some(uri) = uri_of_link(link) else { return };
     if uri.starts_with("spotify:track:") {
         ctx().with_engine(|e| e.play_tracks(vec![uri.clone()], 0));
     } else {
