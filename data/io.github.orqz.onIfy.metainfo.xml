@@ -41,6 +41,11 @@
     <control>pointing</control>
   </recommends>
   <releases>
+    <release version="0.1.3.3" date="2026-10-08">
+      <description>
+        <p>Copy Song Link from the player copies the song's link, right-clicking the playing song or an artist opens the song menu, and onify is spelled onify everywhere.</p>
+      </description>
+    </release>
     <release version="0.1.3.2" date="2026-10-08">
       <description>
         <p>Skipping a paused song plays the next one, Previous on the first song starts it over instead of stopping, song links copy on Windows, and Windows gets smooth wheel scrolling and its own font (Adwaita Sans).</p>
