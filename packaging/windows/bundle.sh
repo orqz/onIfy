@@ -28,6 +28,12 @@ for file in "$out/bin/onify.exe" "$loaders"/loaders/*.dll; do
 done
 
 cp "$MINGW_PREFIX/share/glib-2.0/schemas/gschemas.compiled" "$out/share/glib-2.0/schemas/"
+# Fontconfig's setup, for Pango's FreeType text rendering (see windows_fonts
+# in ui/mod.rs); fontconfig looks for it in ..\etc\fonts next to its DLL.
+if [ -d "$MINGW_PREFIX/etc/fonts" ]; then
+    mkdir -p "$out/etc"
+    cp -r "$MINGW_PREFIX/etc/fonts" "$out/etc/"
+fi
 # GTK's own widgets (search field, spinners, window buttons) use these icons.
 cp -r "$MINGW_PREFIX/share/icons/Adwaita" "$out/share/icons/"
 rm -rf "$out/share/icons/Adwaita/cursors"

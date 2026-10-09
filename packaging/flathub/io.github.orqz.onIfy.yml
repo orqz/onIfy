@@ -1,3 +1,5 @@
+# The manifest for Flathub: the same build as packaging/flatpak, but from a
+# tagged release on GitHub instead of this folder. See README.md here.
 id: io.github.orqz.onIfy
 runtime: org.gnome.Platform
 runtime-version: "51"
@@ -32,10 +34,8 @@ modules:
           - install -Dm644 data/icons/io.github.orqz.onIfy.svg -t /app/share/icons/hicolor/scalable/apps/
           - install -Dm644 data/io.github.orqz.onIfy.metainfo.xml -t /app/share/metainfo/
       sources:
-          - type: dir
-            path: ../..
-            skip:
-                - target
-                - dist
-                - .flatpak-builder
+          - type: git
+            url: https://github.com/orqz/onify.git
+            tag: v0.1.4.0
+            commit: COMMIT-OF-THE-TAG
           - cargo-sources.json

@@ -1,9 +1,17 @@
 ; The Windows installer: dist/onify (from bundle.sh) into Program Files, or
 ; the user's own folder when they aren't an admin, with a Start menu entry.
-; Build: ISCC /DAppVersion=0.1.0 packaging\windows\onify.iss
+; Build: ISCC /DAppVersion=0.1.0 [/DArch=arm64] packaging\windows\onify.iss
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
+#endif
+#ifndef Arch
+  #define Arch "x86_64"
+#endif
+#if Arch == "arm64"
+  #define InnoArch "arm64"
+#else
+  #define InnoArch "x64compatible"
 #endif
 
 [Setup]
@@ -17,10 +25,10 @@ DefaultGroupName=onify
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
-ArchitecturesAllowed=x64compatible
-ArchitecturesInstallIn64BitMode=x64compatible
+ArchitecturesAllowed={#InnoArch}
+ArchitecturesInstallIn64BitMode={#InnoArch}
 OutputDir=..\..\dist
-OutputBaseFilename=onify-setup-x86_64
+OutputBaseFilename=onify-setup-{#Arch}
 SetupIconFile=onify.ico
 UninstallDisplayIcon={app}\onify.ico
 Compression=lzma2/max

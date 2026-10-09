@@ -55,7 +55,11 @@ impl Install {
     fn wants(&self, name: &str) -> bool {
         match self {
             Install::File(_) => name.ends_with(".AppImage") && name.contains(std::env::consts::ARCH),
-            Install::WindowsInstaller => name.ends_with(".exe"),
+            // onify-setup-x86_64.exe or onify-setup-arm64.exe.
+            Install::WindowsInstaller => {
+                let arch = if std::env::consts::ARCH == "aarch64" { "arm64" } else { "x86_64" };
+                name.ends_with(".exe") && name.contains(arch)
+            }
             Install::MacApp(_) => name.ends_with(".dmg"),
             Install::Flatpak | Install::Package | Install::Manual => false,
         }
