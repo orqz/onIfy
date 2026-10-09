@@ -7,6 +7,7 @@
 use std::cell::{Cell, RefCell};
 
 use gtk::gdk_pixbuf::prelude::*;
+use gtk::prelude::*;
 use gtk::{gdk_pixbuf, gio};
 use windows_sys::Win32::Foundation::HWND;
 use windows_sys::Win32::Graphics::Gdi::{
