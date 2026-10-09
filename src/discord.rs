@@ -197,23 +197,25 @@ fn activity(p: &Presence) -> Value {
     if !p.album.is_empty() {
         activity["assets"]["large_text"] = json!(clip(&p.album));
     }
-    // Anyone looking at the card can get onify; the song opens on Spotify
-    // (local files have no link, and Discord rejects empty URLs).
-    let mut buttons = vec![json!({ "label": "Get onify", "url": HOME })];
+    // The title and cover open the song on Spotify (local files have no
+    // link, and Discord rejects empty URLs).
     if !p.track_url.is_empty() {
         activity["details_url"] = json!(p.track_url);
-        buttons.push(json!({ "label": "Play on Spotify", "url": p.track_url }));
+        activity["assets"]["large_url"] = json!(p.track_url);
     }
-    activity["buttons"] = json!(buttons);
-    // The cover, with onify's logo in its corner; local files (no cover
-    // link) show the logo itself.
+    // The cover with onify's logo in its corner, like Spotify's own badge,
+    // which leads to onify; local files (no cover link) show the logo itself.
     match &p.cover {
         Some(cover) => {
             activity["assets"]["large_image"] = json!(cover);
             activity["assets"]["small_image"] = json!("onify");
-            activity["assets"]["small_text"] = json!("onify");
+            activity["assets"]["small_text"] = json!("Listening with onify");
+            activity["assets"]["small_url"] = json!(HOME);
         }
-        None => activity["assets"]["large_image"] = json!("onify"),
+        None => {
+            activity["assets"]["large_image"] = json!("onify");
+            activity["assets"]["large_url"] = json!(HOME);
+        }
     }
     if let Some(url) = &p.artist_url {
         activity["state_url"] = json!(url);
