@@ -38,18 +38,9 @@ pub fn page(title: &str, tag: &str, content: &impl IsA<gtk::Widget>, header: &ad
     toolbar.add_top_bar(header);
     toolbar.set_content(Some(content));
     toolbar.set_extend_content_to_top_edge(false);
-    let page = adw::NavigationPage::with_tag(&toolbar, title, tag);
-    // Content fades in as the page slides in.
-    let content = content.clone().upcast::<gtk::Widget>();
-    let fade_slot: Rc<RefCell<Option<adw::TimedAnimation>>> = Rc::default();
-    page.connect_showing(move |_| {
-        let target = adw::PropertyAnimationTarget::new(&content, "opacity");
-        let fade = adw::TimedAnimation::new(&content, 0.0, 1.0, 260, target);
-        fade.set_easing(adw::Easing::EaseOutCubic);
-        fade.play();
-        fade_slot.replace(Some(fade));
-    });
-    page
+    // Pages just slide in: fading the whole page in as well had GTK draw it
+    // off-screen every frame of the slide, which big windows felt.
+    adw::NavigationPage::with_tag(&toolbar, title, tag)
 }
 
 fn scrolled(child: &impl IsA<gtk::Widget>) -> gtk::ScrolledWindow {
@@ -901,11 +892,84 @@ fn note_liked(kind: Kind, tracks: &[Track]) {
     }
 }
 
+/// The page follows its list's header, also when it changes later (a
+/// playlist renamed or opened up for editing).
 fn set_header(loaded: &Loaded, header: Header) {
-    for listener in loaded.listeners.take() {
+    for listener in loaded.listeners.borrow().iter() {
         listener(&header);
     }
     loaded.header.replace(Some(header));
+}
+
+/// The loaded list for a playlist, if its page has been opened.
+fn loaded_list(playlist: &str) -> Option<Rc<Loaded>> {
+    ctx().stores.borrow().get(playlist).cloned()
+}
+
+/// Fetches a playlist again after it changed (songs added, details
+/// edited): its header and songs, with their entry ids.
+pub fn refresh_list(playlist: &str) {
+    let Some(loaded) = loaded_list(playlist) else { return };
+    let Some(api) = ctx().api() else { return };
+    let id = id_of(playlist).to_owned();
+    let weak = Rc::downgrade(&loaded);
+    glib::spawn_future_local(async move {
+        let fresh = rt::spawn(async move { api.all_tracks(Kind::Playlist, id).await }).await;
+        let (Some(loaded), Ok((header, tracks))) = (weak.upgrade(), fresh) else { return };
+        if let Some(header) = header {
+            set_header(&loaded, header);
+        }
+        let n = loaded.store.n_items();
+        loaded.store.splice(1, n.saturating_sub(1), &objects(tracks, 0));
+    });
+}
+
+/// Index of a playlist entry (by uid) in its list (0 is the header slot).
+fn entry_index(store: &gio::ListStore, uid: &str) -> Option<u32> {
+    (1..store.n_items()).find(|&i| {
+        store
+            .item(i)
+            .and_downcast::<glib::BoxedAnyObject>()
+            .is_some_and(|o| o.try_borrow::<Track>().is_ok_and(|t| t.uid == uid))
+    })
+}
+
+/// A song leaves the list straight away (Spotify hears of it after).
+pub fn take_out(playlist: &str, uid: &str) {
+    let Some(loaded) = loaded_list(playlist) else { return };
+    if let Some(i) = entry_index(&loaded.store, uid) {
+        loaded.store.remove(i);
+    }
+}
+
+/// A song moves in the list straight away: before `before`, or to the end.
+pub fn move_within(playlist: &str, uid: &str, before: Option<&str>) {
+    let Some(loaded) = loaded_list(playlist) else { return };
+    let store = &loaded.store;
+    let Some(from) = entry_index(store, uid) else { return };
+    let Some(item) = store.item(from) else { return };
+    store.remove(from);
+    let to = before.and_then(|b| entry_index(store, b)).unwrap_or(store.n_items());
+    store.insert(to, &item);
+}
+
+/// A song dragged onto another: above it, or below it (before the next).
+pub fn drop_song(playlist: &str, moved: &str, target: &str, below: bool) {
+    let Some(loaded) = loaded_list(playlist) else { return };
+    let store = &loaded.store;
+    let Some(at) = entry_index(store, target) else { return };
+    let before = if below {
+        store
+            .item(at + 1)
+            .and_downcast::<glib::BoxedAnyObject>()
+            .and_then(|o| o.try_borrow::<Track>().ok().map(|t| t.uid.clone()))
+    } else {
+        Some(target.to_owned())
+    };
+    if before.as_deref() == Some(moved) {
+        return;
+    }
+    super::playlists::move_song(playlist, moved, before);
 }
 
 /// Fills Local Files from the music folders, scanned off the UI thread.
@@ -931,12 +995,7 @@ fn scan_local(loaded: &Rc<Loaded>) {
             (1, false) => format!("1 song from {}", places.join(", ")),
             (n, false) => format!("{n} songs from {}", places.join(", ")),
         };
-        let header = Header {
-            title: String::new(),
-            subtitle,
-            images: Images::default(),
-            artists: Vec::new(),
-        };
+        let header = Header { subtitle, ..Default::default() };
         set_header(&loaded, header);
         loaded.store.extend_from_slice(&objects(tracks, 0));
     });
@@ -1016,6 +1075,20 @@ pub fn tracks_page(kind: Kind, uri: &str, title: &str, images: &Images) -> adw::
         folders.set_action_name(Some("app.preferences"));
         hero.actions.append(&folders);
     }
+    // A playlist's ⋯: Add Songs, Edit Details, Delete, as far as the user
+    // may (known once it loads).
+    let list_info = (kind == Kind::Playlist).then(|| {
+        Rc::new(super::track_row::ListInfo { uri: uri.to_owned(), editable: Cell::new(false) })
+    });
+    let more = gtk::MenuButton::builder()
+        .icon_name("onify-view-more-symbolic")
+        .tooltip_text("More")
+        .valign(gtk::Align::Center)
+        .visible(false)
+        .build();
+    more.add_css_class("glass-button");
+    more.add_css_class("circular");
+    hero.actions.append(&more);
 
     let header_widget = vbox(0);
     header_widget.append(&hero.widget);
@@ -1080,7 +1153,7 @@ pub fn tracks_page(kind: Kind, uri: &str, title: &str, images: &Images) -> adw::
     });
     let list = gtk::ListView::builder()
         .model(&selection)
-        .factory(&factory(mode, header_widget.upcast()))
+        .factory(&factory(mode, header_widget.upcast(), list_info.clone()))
         .single_click_activate(false)
         .build();
     list.add_css_class("tracks");
@@ -1112,21 +1185,38 @@ pub fn tracks_page(kind: Kind, uri: &str, title: &str, images: &Images) -> adw::
     let header = fading_header(title, &scroller.vadjustment(), 200.0);
     let window_title = header.title_widget().and_downcast::<adw::WindowTitle>().map(|t| t.downgrade());
     let find = find_in_list(&header, kind, &query, &filter, &scroller);
-    let update = move |h: &Header| {
-        apply_header(h);
-        if let Some(t) = window_title.as_ref().and_then(|w| w.upgrade()) {
-            if !h.title.is_empty() {
-                t.set_title(&h.title);
+    let details: Rc<RefCell<Header>> = Rc::default();
+    let update = {
+        let (list_info, more, details) = (list_info.clone(), more.downgrade(), details.clone());
+        let playlist = uri.to_owned();
+        move |h: &Header| {
+            apply_header(h);
+            if let Some(t) = window_title.as_ref().and_then(|w| w.upgrade()) {
+                if !h.title.is_empty() {
+                    t.set_title(&h.title);
+                }
+            }
+            details.replace(h.clone());
+            if let (Some(info), Some(more)) = (&list_info, more.upgrade()) {
+                info.editable.set(h.can_edit_items);
+                let menu = super::playlists::page_menu(&playlist, h.can_edit_items, h.can_edit_details);
+                more.set_visible(menu.n_items() > 0 && (0..menu.n_items()).any(|i| {
+                    menu.item_link(i, gio::MENU_LINK_SECTION).is_some_and(|s| s.n_items() > 0)
+                }));
+                more.set_menu_model(Some(&menu));
             }
         }
     };
     let ready = loaded.header.borrow().clone();
-    match ready {
-        Some(h) => update(&h),
-        None => loaded.listeners.borrow_mut().push(Box::new(update)),
+    if let Some(h) = ready {
+        update(&h);
     }
+    loaded.listeners.borrow_mut().push(Box::new(update));
     let tag = if kind == Kind::Liked { "liked" } else { uri };
     let page = page(title, tag, &scroller, &header);
+    if kind == Kind::Playlist {
+        page.insert_action_group("playlist", Some(&playlist_actions(uri, &details)));
+    }
     FINDERS.with_borrow_mut(|finders| {
         finders.retain(|(p, _)| p.upgrade().is_some());
         finders.push((page.downgrade(), find.downgrade()));
@@ -1135,6 +1225,21 @@ pub fn tracks_page(kind: Kind, uri: &str, title: &str, images: &Images) -> adw::
         slide_out_on_show(&page, &record);
     }
     page
+}
+
+/// What a playlist page's ⋯ menu does.
+fn playlist_actions(playlist: &str, details: &Rc<RefCell<Header>>) -> gio::SimpleActionGroup {
+    let group = gio::SimpleActionGroup::new();
+    let add = |name: &str, run: Box<dyn Fn(&str, &Header)>| {
+        let action = gio::SimpleAction::new(name, None);
+        let (playlist, details) = (playlist.to_owned(), details.clone());
+        action.connect_activate(move |_, _| run(&playlist, &details.borrow()));
+        group.add_action(&action);
+    };
+    add("add-songs", Box::new(|p, h| super::playlists::add_songs(p, &h.title)));
+    add("edit", Box::new(|p, h| super::playlists::edit_details(p, &h.title, &h.description)));
+    add("delete", Box::new(|p, h| super::playlists::delete(p, &h.title, h.can_edit_details)));
+    group
 }
 
 thread_local! {
@@ -1246,6 +1351,8 @@ fn find_in_list(
 }
 
 /// The record slides out of its sleeve each time the page comes into view.
+/// It's laid out in its final place and only drawn shifted back under the
+/// sleeve, so the slide moves pixels without laying the header out again.
 fn slide_out_on_show(page: &adw::NavigationPage, record: &Cover) {
     let record = record.downgrade();
     let slide: Rc<RefCell<Option<adw::TimedAnimation>>> = Rc::default();
@@ -1255,10 +1362,11 @@ fn slide_out_on_show(page: &adw::NavigationPage, record: &Cover) {
             return;
         }
         let to = peek(TIER.get().art()) as f64;
+        record.set_shift(-to as f32);
         let weak = record.downgrade();
         let target = adw::CallbackAnimationTarget::new(move |value| {
             if let Some(record) = weak.upgrade() {
-                record.set_margin_start(value as i32);
+                record.set_shift((value - to) as f32);
             }
         });
         let animation = adw::TimedAnimation::new(&record, 0.0, to, 700, target);

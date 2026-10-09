@@ -344,7 +344,7 @@ impl PlayerBar {
             move |gesture, _, x, y| {
                 let Some(now) = ctx().now.borrow().clone() else { return };
                 gesture.set_state(gtk::EventSequenceState::Claimed);
-                let menu = super::track_row::song_menu(&now.uri, None, &now.artists, false);
+                let menu = super::track_row::song_menu(&now.uri, &now.name, None, &now.artists, false, None);
                 super::track_row::popup_menu(&popover, &menu, x, y);
             }
         ));

@@ -60,6 +60,8 @@ mod imp {
         /// Position in a list view, for its play button.
         pub position: std::cell::Cell<u32>,
         pub hovered: std::cell::Cell<bool>,
+        /// The list it's in, when that's a playlist page.
+        pub list: RefCell<Option<std::rc::Rc<super::ListInfo>>>,
     }
 
     #[glib::object_subclass]
@@ -224,9 +226,25 @@ pub fn open_links(label: &gtk::Label) {
     });
 }
 
+/// The list a row is in, for its menu and dragging: the playlist, and
+/// whether the user may change it.
+#[derive(Default)]
+pub struct ListInfo {
+    pub uri: String,
+    pub editable: std::cell::Cell<bool>,
+}
+
 /// A song's menu, wherever it's right-clicked. Without the album's uri,
-/// "Go to Album" looks it up from the song.
-pub fn song_menu(uri: &str, album: Option<&str>, artists: &[crate::api::Named], queue: bool) -> gio::Menu {
+/// "Go to Album" looks it up from the song. `entry`: the user's playlist the
+/// song is in, and its entry there, for "Remove from this Playlist".
+pub fn song_menu(
+    uri: &str,
+    name: &str,
+    album: Option<&str>,
+    artists: &[crate::api::Named],
+    queue: bool,
+    entry: Option<(&str, &str)>,
+) -> gio::Menu {
     let menu = gio::Menu::new();
     let add = |label: &str, action: &str, target: &str| {
         let item = gio::MenuItem::new(Some(label), None);
@@ -236,6 +254,12 @@ pub fn song_menu(uri: &str, album: Option<&str>, artists: &[crate::api::Named], 
     let spotify_track = uri.starts_with("spotify:track:");
     if queue {
         add("Add to Queue", "app.queue", uri);
+    }
+    if spotify_track {
+        menu.append_submenu(Some("Add to Playlist"), &super::playlists::add_to_menu(uri, name));
+    }
+    if let Some((playlist, uid)) = entry.filter(|(_, uid)| !uid.is_empty()) {
+        add("Remove from this Playlist", "app.remove-from-playlist", &format!("{playlist}\t{uid}"));
     }
     match album.filter(|a| !a.is_empty()) {
         Some(album) => add("Go to Album", "app.open", album),
@@ -574,9 +598,20 @@ impl TrackRow {
         }
     }
 
+    pub fn set_list(&self, list: Option<std::rc::Rc<ListInfo>>) {
+        self.imp().list.replace(list);
+    }
+
+    /// The playlist it's in, if the user may change that playlist.
+    fn editable_list(&self) -> Option<String> {
+        self.imp().list.borrow().as_ref().filter(|l| l.editable.get()).map(|l| l.uri.clone())
+    }
+
     fn show_menu(&self, x: f64, y: f64) {
         let Some(track) = self.track() else { return };
-        let menu = song_menu(&track.uri, Some(&track.album.uri), &track.artists, true);
+        let playlist = self.editable_list();
+        let entry = playlist.as_deref().map(|p| (p, track.uid.as_str()));
+        let menu = song_menu(&track.uri, &track.name, Some(&track.album.uri), &track.artists, true, entry);
         let popover = self.imp().menu.get_or_init(|| {
             let popover = gtk::PopoverMenu::from_model(None::<&gio::MenuModel>);
             popover.set_parent(self);
@@ -699,13 +734,20 @@ pub fn column_header(mode: RowMode) -> gtk::Box {
 }
 
 /// A recycling factory: only the rows on screen exist, however long the list.
-/// The item at position 0 is a [`HeaderSlot`] that shows `header`.
-pub fn factory(mode: RowMode, header: gtk::Widget) -> gtk::SignalListItemFactory {
+/// The item at position 0 is a [`HeaderSlot`] that shows `header`. Rows in
+/// one of the user's playlists (`list`) can be dragged to move them.
+pub fn factory(mode: RowMode, header: gtk::Widget, list: Option<std::rc::Rc<ListInfo>>) -> gtk::SignalListItemFactory {
     let factory = gtk::SignalListItemFactory::new();
+    let rows_list = list.clone();
     factory.connect_setup(move |_, item| {
         let item = item.downcast_ref::<gtk::ListItem>().unwrap();
         let slot = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        slot.append(&TrackRow::new(mode));
+        let row = TrackRow::new(mode);
+        row.set_list(rows_list.clone());
+        if let Some(list) = &rows_list {
+            draggable(&row, list);
+        }
+        slot.append(&row);
         item.set_child(Some(&slot));
     });
     factory.connect_bind(move |_, item| {
@@ -742,6 +784,77 @@ pub fn factory(mode: RowMode, header: gtk::Widget) -> gtk::SignalListItemFactory
         row.bind(&object, number);
     });
     factory
+}
+
+/// In the user's own playlist, a row can be dragged onto another to move it
+/// there (above or below it, whichever half it's dropped on).
+fn draggable(row: &TrackRow, list: &std::rc::Rc<ListInfo>) {
+    let drag = gtk::DragSource::new();
+    drag.set_actions(gdk::DragAction::MOVE);
+    drag.connect_prepare(glib::clone!(
+        #[weak]
+        row,
+        #[strong]
+        list,
+        #[upgrade_or]
+        None,
+        move |_, _, _| {
+            let uid = row.track().map(|t| t.uid).filter(|u| !u.is_empty() && list.editable.get())?;
+            Some(gdk::ContentProvider::for_value(&uid.to_value()))
+        }
+    ));
+    drag.connect_drag_begin(glib::clone!(
+        #[weak]
+        row,
+        move |source, _| {
+            let picture = gtk::WidgetPaintable::new(Some(&row));
+            source.set_icon(Some(&picture), 24, row.height() / 2);
+        }
+    ));
+    row.add_controller(drag);
+
+    let drop = gtk::DropTarget::new(String::static_type(), gdk::DragAction::MOVE);
+    let mark = |row: &TrackRow, y: Option<f64>| {
+        row.remove_css_class("drop-above");
+        row.remove_css_class("drop-below");
+        if let Some(y) = y {
+            row.add_css_class(if y < row.height() as f64 / 2.0 { "drop-above" } else { "drop-below" });
+        }
+    };
+    drop.connect_motion(glib::clone!(
+        #[weak]
+        row,
+        #[upgrade_or]
+        gdk::DragAction::empty(),
+        move |_, _, y| {
+            mark(&row, Some(y));
+            gdk::DragAction::MOVE
+        }
+    ));
+    drop.connect_leave(glib::clone!(
+        #[weak]
+        row,
+        move |_| mark(&row, None)
+    ));
+    drop.connect_drop(glib::clone!(
+        #[weak]
+        row,
+        #[strong]
+        list,
+        #[upgrade_or]
+        false,
+        move |_, value, _, y| {
+            mark(&row, None);
+            let (Ok(moved), Some(target)) = (value.get::<String>(), row.track()) else { return false };
+            if moved == target.uid || !list.editable.get() {
+                return false;
+            }
+            let below = y >= row.height() as f64 / 2.0;
+            super::pages::drop_song(&list.uri, &moved, &target.uid, below);
+            true
+        }
+    ));
+    row.add_controller(drop);
 }
 
 /// Wraps tracks as list model items, numbered on from `after` (the songs

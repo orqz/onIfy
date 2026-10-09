@@ -10,6 +10,7 @@ mod integrations;
 mod lyrics;
 mod pages;
 mod player_bar;
+mod playlists;
 mod preferences;
 #[cfg(windows)]
 mod thumbbar;
@@ -156,6 +157,18 @@ impl Ctx {
             .map(|e| e.session.username())
             .unwrap_or_default();
         format!("spotify:user:{user}:collection")
+    }
+}
+
+/// The logged-in user's Spotify username (empty before connecting).
+pub fn username() -> String {
+    ctx().engine.borrow().as_ref().map(|e| e.session.username()).unwrap_or_default()
+}
+
+/// The page for `uri` went away (a deleted playlist): if it's showing, Home.
+pub fn left_page(uri: &str) {
+    if stack_has(&ctx().nav, uri) {
+        navigate(Route::Home, true);
     }
 }
 
@@ -440,6 +453,7 @@ fn liked_card() -> Card {
         name: "Liked Songs".into(),
         subtitle: String::new(),
         images: Images::default(),
+        owner: String::new(),
     }
 }
 
@@ -450,6 +464,7 @@ fn local_card() -> Card {
         name: "Local Files".into(),
         subtitle: String::new(),
         images: Images::default(),
+        owner: String::new(),
     }
 }
 
@@ -697,7 +712,7 @@ fn apply_rail() {
 /// "Your Library" heading goes).
 fn rail_row(row: &gtk::ListBoxRow, rail: bool) {
     let Some(content) = row.child() else { return };
-    if content.is::<gtk::Label>() {
+    if row.has_css_class("heading-row") {
         row.set_visible(!rail);
         return;
     }
@@ -709,7 +724,7 @@ fn rail_row(row: &gtk::ListBoxRow, rail: bool) {
     }
 }
 
-fn fill_sidebar(playlists: &[Card]) {
+fn fill_sidebar(library: &[Card]) {
     let ctx = ctx();
     let mut routes = ctx.sidebar_routes.borrow_mut();
     while routes.len() > FIXED_ROWS {
@@ -718,25 +733,40 @@ fn fill_sidebar(playlists: &[Card]) {
             ctx.sidebar.remove(&row);
         }
     }
-    if playlists.is_empty() {
+    if library.is_empty() {
         return;
     }
-    let heading = gtk::Label::builder().label("Your Library").xalign(0.0).build();
+    // "Your Library", with + for a new playlist.
+    let heading = gtk::Label::builder().label("Your Library").xalign(0.0).hexpand(true).build();
     heading.add_css_class("sidebar-heading");
+    let create = gtk::Button::builder()
+        .icon_name("onify-list-add-symbolic")
+        .tooltip_text("Create Playlist")
+        .valign(gtk::Align::End)
+        .action_name("app.new-playlist-with")
+        .action_target(&"".to_variant())
+        .build();
+    create.add_css_class("flat");
+    create.add_css_class("circular");
+    create.add_css_class("create-playlist");
+    let heading_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    heading_box.append(&heading);
+    heading_box.append(&create);
     let heading_row = gtk::ListBoxRow::builder()
-        .child(&heading)
+        .child(&heading_box)
         .activatable(false)
         .selectable(false)
         .build();
+    heading_row.add_css_class("heading-row");
     ctx.sidebar.append(&heading_row);
     routes.push(None);
     let rail = ctx.settings.borrow().sidebar_collapsed && !ctx.split.is_collapsed();
     rail_row(&heading_row, rail);
-    for playlist in playlists {
-        let row = library_row(playlist);
+    for card in library {
+        let row = library_row(card);
         rail_row(&row, rail);
         ctx.sidebar.append(&row);
-        routes.push(Some(Route::Card(playlist.clone())));
+        routes.push(Some(Route::Card(card.clone())));
     }
 }
 
@@ -931,6 +961,7 @@ pub fn open_uri(uri: &str) {
         name: name.into(),
         subtitle: String::new(),
         images: Images::default(),
+        owner: String::new(),
     });
 }
 
@@ -1175,6 +1206,7 @@ fn show_cached_library() {
         let (library, home) = rt::spawn(async move { tokio::join!(cached.library(), cached.home()) }).await;
         let ctx = ctx();
         if let Ok(library) = library {
+            playlists::library_loaded(&library);
             if ctx.shown_library.borrow().is_none() {
                 fill_sidebar(&library);
                 ctx.shown_library.replace(Some(library));
@@ -1200,6 +1232,7 @@ fn load_library() {
         let ctx = ctx();
         match library {
             Ok(library) => {
+                playlists::library_loaded(&library);
                 let same = ctx.shown_library.borrow().as_deref().is_some_and(|shown| same_cards(shown, &library));
                 if !same {
                     fill_sidebar(&library);
@@ -1476,6 +1509,9 @@ fn install_actions(app: &adw::Application) {
         app.add_action(&a);
     };
     with_string("open", open_uri);
+    with_string("add-to-playlist", playlists::add_from_menu);
+    with_string("new-playlist-with", playlists::new_playlist);
+    with_string("remove-from-playlist", playlists::remove_from_menu);
     with_string("album-of", open_album_of);
     // Developer aid: with ONIFY_DEV set, `app.dev-render` saves the window as a
     // PNG at 2x, even while it's on another workspace.
@@ -1498,6 +1534,23 @@ fn install_actions(app: &adw::Application) {
         with_string("dev-scroll", |_| dev_scroll());
         with_string("dev-volume", |_| ctx().bar.show_volume_pop());
         with_string("dev-devices", |_| log::warn!("dev-devices: {}", devices::describe()));
+        // Types into the focused search field (Add Songs, Search).
+        with_string("dev-type", |text| {
+            let entry = gtk::prelude::GtkWindowExt::focus(&ctx().window)
+                .and_then(|f| f.ancestor(gtk::SearchEntry::static_type()))
+                .and_downcast::<gtk::SearchEntry>();
+            if let Some(entry) = entry {
+                entry.set_text(text);
+            }
+        });
+        // Runs one of the visible playlist page's ⋯ actions (edit, add-songs).
+        with_string("dev-page-action", |name| {
+            if let Some(page) = ctx().nav.visible_page() {
+                let tag = page.tag();
+                let ran = page.activate_action(&format!("playlist.{name}"), None);
+                log::warn!("dev-page-action {name} on {tag:?}: {ran:?}");
+            }
+        });
         with_string("dev-shuffle", |_| ctx().bar.toggle_shuffle());
         // Plays a playlist or album from the top, as its Play button does.
         with_string("dev-play-context", |uri| ctx().with_engine(|e| e.play_context(uri, None, None)));

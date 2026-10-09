@@ -36,6 +36,7 @@
     <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-speaker-symbolic.svg">icons/onify-speaker-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-tv-symbolic.svg">icons/onify-tv-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-devices-symbolic.svg">icons/onify-devices-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-check-symbolic.svg">icons/onify-check-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="icons/scalable/apps/io.github.orqz.onIfy.svg">icons/io.github.orqz.onIfy.svg</file>
   </gresource>
 </gresources>

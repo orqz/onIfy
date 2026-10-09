@@ -22,7 +22,7 @@ const PATHFINDER: &str = "https://api-partner.spotify.com/pathfinder/v2/query";
 const WEB_PLAYER: &str = "https://open.spotify.com/";
 const CHUNK_BASE: &str = "https://open.spotifycdn.com/cdn/build/web-player/";
 
-/// Query hashes as of October 2026; refreshed automatically when they rotate.
+/// Query hashes as of 10 October 2026; refreshed automatically when they rotate.
 const DEFAULT_HASHES: &[(&str, &str)] = &[
     ("searchDesktop", "1148393611bbc58e84e47aed35ecc731275df9f9eb660956962e352dd3631d89"),
     ("fetchPlaylist", "8964e8eafb21aa992a7d951d256d83285c04be2105d209262901de70cb97584a"),
@@ -33,8 +33,11 @@ const DEFAULT_HASHES: &[(&str, &str)] = &[
     ("libraryV3", "390c78e5b951029bad359785e69b07b536a509c581cbcd0aded5e5067f187455"),
     ("fetchLibraryTracks", "087278b20b743578a6262c2b0b4bcd20d879c503cc359a2285baf083ef944240"),
     ("areEntitiesInLibrary", "134337999233cc6fdd6b1e6dbf94841409f04a946c5c7b744b09ba0dfe5a85ed"),
-    ("addToLibrary", "1ad0d40b3c09660d818b9e770eb1e84745dfbe941df159a64f8772b6fa2bfc3a"),
-    ("removeFromLibrary", "1ad0d40b3c09660d818b9e770eb1e84745dfbe941df159a64f8772b6fa2bfc3a"),
+    ("addToLibrary", "896ebcb47815681340860d121cb5d494e157e2a78d3950385cd54e0393c67148"),
+    ("removeFromLibrary", "896ebcb47815681340860d121cb5d494e157e2a78d3950385cd54e0393c67148"),
+    ("addToPlaylist", "b907ad6b088d5bf7680fa81198996d58398c2d55dfcdf59fcc959e0be98a418a"),
+    ("removeFromPlaylist", "b907ad6b088d5bf7680fa81198996d58398c2d55dfcdf59fcc959e0be98a418a"),
+    ("moveItemsInPlaylist", "b907ad6b088d5bf7680fa81198996d58398c2d55dfcdf59fcc959e0be98a418a"),
 ];
 
 static HASHES: LazyLock<RwLock<HashMap<String, String>>> = LazyLock::new(|| {
@@ -116,6 +119,9 @@ pub struct Track {
     pub plays: u64,
     /// Where it sits in its list, from 1 (set when listed; see track_row::objects).
     pub position: u32,
+    /// Its entry in a playlist (the same song can be in one twice), for
+    /// removing and moving it.
+    pub uid: String,
 }
 
 impl Track {
@@ -154,6 +160,7 @@ impl Track {
             number: 0,
             plays: 0,
             position: 0,
+            uid: String::new(),
         })
     }
 
@@ -206,6 +213,7 @@ impl Track {
                 .or(t["playcount"].as_u64())
                 .unwrap_or(0),
             position: 0,
+            uid: String::new(),
             uri,
         })
     }
@@ -229,6 +237,9 @@ pub struct Card {
     pub name: String,
     pub subtitle: String,
     pub images: Images,
+    /// A playlist's owner (their username), so onify knows which are the
+    /// user's own to add songs to.
+    pub owner: String,
 }
 
 impl Card {
@@ -260,6 +271,7 @@ impl Card {
                         "Playlist".into()
                     },
                     images: Images::parse(&d["images"]["items"][0]["sources"]),
+                    owner: str_of(&d["ownerV2"]["data"]["username"]),
                 }
             }
             "Album" => {
@@ -278,6 +290,7 @@ impl Card {
                         .collect::<Vec<_>>()
                         .join(" • "),
                     images: Images::parse(&d["coverArt"]["sources"]),
+                    owner: String::new(),
                 }
             }
             "Artist" => Self {
@@ -286,6 +299,7 @@ impl Card {
                 name: str_of(&d["profile"]["name"]),
                 subtitle: "Artist".into(),
                 images: Images::parse(&d["visuals"]["avatarImage"]["sources"]),
+                owner: String::new(),
             },
             _ => return None,
         };
@@ -314,6 +328,7 @@ impl Card {
             name,
             subtitle: [year, kind.to_owned()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" • "),
             images: Images::parse(&d["coverArt"]["sources"]),
+            owner: String::new(),
         })
     }
 }
@@ -334,6 +349,13 @@ pub struct Header {
     pub images: Images,
     /// An album's artists, which start its subtitle and link to their pages.
     pub artists: Vec<Named>,
+    /// A playlist's own description (its subtitle shows the owner instead).
+    pub description: String,
+    /// The playlist is the user's (or they collaborate on it): songs can be
+    /// added, removed and moved.
+    pub can_edit_items: bool,
+    /// Its name and description can be changed, and it can be deleted.
+    pub can_edit_details: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -706,7 +728,14 @@ impl Api {
                 _ => (&v["me"]["library"]["tracks"]["items"], "track"),
             };
             let items = items.as_array().map(Vec::as_slice).unwrap_or_default();
-            let tracks = items.iter().filter_map(|i| Track::parse(&i[field], album)).collect();
+            let tracks = items
+                .iter()
+                .filter_map(|i| {
+                    let mut track = Track::parse(&i[field], album)?;
+                    track.uid = str_of(&i["uid"]);
+                    Some(track)
+                })
+                .collect();
             (tracks, items.len())
         };
 
@@ -719,11 +748,15 @@ impl Api {
                 let total = p["content"]["totalCount"].as_u64().unwrap_or(0) as usize;
                 let owner = str_of(&p["ownerV2"]["data"]["name"]);
                 let subtitle = [owner, songs(total)].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>();
+                let capabilities = &p["currentUserCapabilities"];
                 let header = Header {
                     title: str_of(&p["name"]),
                     subtitle: subtitle.join(" • "),
                     images: Images::parse(&p["images"]["items"][0]["sources"]),
                     artists: Vec::new(),
+                    description: strip_tags(&str_of(&p["description"])),
+                    can_edit_items: capabilities["canEditItems"].as_bool().unwrap_or(false),
+                    can_edit_details: capabilities["canEditMetadata"].as_bool().unwrap_or(false),
                 };
                 (total, header, None)
             }
@@ -743,6 +776,7 @@ impl Api {
                     subtitle: subtitle.into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" • "),
                     images: images.clone(),
                     artists: album_artists,
+                    ..Default::default()
                 };
                 (total, header, Some((named, images)))
             }
@@ -751,8 +785,7 @@ impl Api {
                 let header = Header {
                     title: "Liked Songs".into(),
                     subtitle: songs(total),
-                    images: Images::default(),
-                    artists: Vec::new(),
+                    ..Default::default()
                 };
                 (total, header, None)
             }
@@ -815,6 +848,120 @@ impl Api {
             .await
             .map(drop)
             .map_err(|e| e.to_string())
+    }
+
+    /// Adds songs to the end of a playlist.
+    pub async fn add_to_playlist(&self, playlist: &str, tracks: &[String]) -> Result<()> {
+        let variables = json!({
+            "playlistUri": playlist,
+            "playlistItemUris": tracks,
+            "newPosition": { "moveType": "BOTTOM_OF_PLAYLIST", "fromUid": null },
+            "interactionId": null,
+        });
+        self.query("addToPlaylist", variables).await.map(drop)
+    }
+
+    /// Takes songs (by their entries' uids) out of a playlist.
+    pub async fn remove_from_playlist(&self, playlist: &str, uids: &[String]) -> Result<()> {
+        self.query("removeFromPlaylist", json!({ "playlistUri": playlist, "uids": uids })).await.map(drop)
+    }
+
+    /// Moves songs (by uid) to just before the entry `before`, or to the end.
+    pub async fn move_in_playlist(&self, playlist: &str, uids: &[String], before: Option<&str>) -> Result<()> {
+        let position = match before {
+            Some(uid) => json!({ "moveType": "BEFORE_UID", "fromUid": uid }),
+            None => json!({ "moveType": "BOTTOM_OF_PLAYLIST", "fromUid": null }),
+        };
+        self.query("moveItemsInPlaylist", json!({ "playlistUri": playlist, "uids": uids, "newPosition": position }))
+            .await
+            .map(drop)
+    }
+
+    /// Sends playlist4 changes (the JSON Spotify's apps send) to `endpoint`.
+    async fn playlist_changes(&self, endpoint: &str, body: Value) -> Result<Value> {
+        let mut headers = http::HeaderMap::new();
+        headers.insert(http::header::CONTENT_TYPE, http::HeaderValue::from_static("application/json"));
+        let bytes = self
+            .session()?
+            .spclient()
+            .request_as_json(&Method::POST, endpoint, Some(headers), Some(&body.to_string()))
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    }
+
+    /// One change, as Spotify's web player sends it.
+    fn changes(op: Value) -> Value {
+        json!({
+            "deltas": [{ "ops": [op], "info": { "source": { "client": "WEBPLAYER" } } }],
+            "wantResultingRevisions": false,
+            "wantSyncResult": false,
+            "nonces": [],
+        })
+    }
+
+    /// Changes to the user's list of playlists (their library's playlists).
+    async fn rootlist_changes(&self, op: Value) -> Result<()> {
+        let user = self.session()?.username();
+        let endpoint = format!("/playlist/v2/user/{}/rootlist/changes", url::form_urlencoded::byte_serialize(user.as_bytes()).collect::<String>());
+        self.playlist_changes(&endpoint, Self::changes(op)).await.map(drop)
+    }
+
+    /// Makes a new, empty playlist at the top of the user's library and
+    /// returns its uri.
+    pub async fn create_playlist(&self, name: &str) -> Result<String> {
+        let delta = json!({
+            "ops": [{
+                "kind": "UPDATE_LIST_ATTRIBUTES",
+                "updateListAttributes": {
+                    "newAttributes": { "values": { "name": name, "formatAttributes": [], "pictureSize": [] }, "noValue": [] },
+                },
+            }],
+            "info": { "source": { "client": "WEBPLAYER" } },
+        });
+        let made = self.playlist_changes("/playlist/v2/playlist", delta).await?;
+        let uri = str_of(&made["uri"]);
+        if !uri.starts_with("spotify:playlist:") {
+            return Err("Spotify didn't make the playlist".into());
+        }
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+            .to_string();
+        self.rootlist_changes(json!({
+            "kind": "ADD",
+            "add": {
+                "addFirst": true,
+                "items": [{ "uri": uri, "attributes": { "timestamp": timestamp, "formatAttributes": [], "availableSignals": [] } }],
+            },
+        }))
+        .await?;
+        Ok(uri)
+    }
+
+    /// Renames a playlist and sets its description (empty clears it).
+    pub async fn edit_playlist(&self, playlist: &str, name: &str, description: &str) -> Result<()> {
+        let mut values = json!({ "name": name, "formatAttributes": [], "pictureSize": [] });
+        let mut no_value = Vec::new();
+        if description.trim().is_empty() {
+            no_value.push("LIST_DESCRIPTION");
+        } else {
+            values["description"] = json!(description.trim());
+        }
+        let op = json!({
+            "kind": "UPDATE_LIST_ATTRIBUTES",
+            "updateListAttributes": { "newAttributes": { "values": values, "noValue": no_value } },
+        });
+        let endpoint = format!("/playlist/v2/playlist/{}/changes", id_of(playlist));
+        self.playlist_changes(&endpoint, Self::changes(op)).await.map(drop)
+    }
+
+    /// Takes a playlist out of the user's library; for their own playlists
+    /// that's Spotify's "Delete".
+    pub async fn delete_playlist(&self, playlist: &str) -> Result<()> {
+        self.rootlist_changes(json!({ "kind": "REM", "rem": { "itemsAsKey": true, "items": [{ "uri": playlist }] } }))
+            .await
     }
 
     /// Sends a Spotify Connect command to another of the account's devices:
@@ -931,6 +1078,7 @@ impl Api {
             name: track.album.name.clone(),
             subtitle: String::new(),
             images: Images::default(),
+            owner: String::new(),
         })
     }
 }

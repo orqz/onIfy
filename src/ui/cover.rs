@@ -24,6 +24,9 @@ mod imp {
         pub record: Cell<bool>,
         /// The record's turn, in degrees.
         pub angle: Cell<f64>,
+        /// Drawn this far to the right of where it's laid out (the record
+        /// sliding out of its sleeve: drawing only, no relayout).
+        pub shift: Cell<f32>,
         pub spin: RefCell<Option<gtk::TickCallbackId>>,
     }
 
@@ -105,10 +108,25 @@ mod imp {
             let (w, h) = (widget.width() as f32, widget.height() as f32);
             let side = w.min(h);
             let bounds = graphene::Rect::new((w - side) / 2.0, (h - side) / 2.0, side, side);
+            let shift = self.shift.get();
+            if shift != 0.0 {
+                snapshot.save();
+                snapshot.translate(&graphene::Point::new(shift, 0.0));
+            }
             if self.record.get() {
                 self.snapshot_record(snapshot, &bounds);
-                return;
+            } else {
+                self.snapshot_cover(snapshot, &bounds);
             }
+            if shift != 0.0 {
+                snapshot.restore();
+            }
+        }
+    }
+
+    impl Cover {
+        fn snapshot_cover(&self, snapshot: &gtk::Snapshot, bounds: &graphene::Rect) {
+            let bounds = *bounds;
             let radius = self.radius.get().min(bounds.width() / 2.0);
             snapshot.push_rounded_clip(&gsk::RoundedRect::from_rect(bounds, radius));
             let opacity = self.opacity.get();
@@ -157,6 +175,13 @@ impl Cover {
         }
         imp.size.set(size);
         self.queue_resize();
+    }
+
+    /// Draws it `px` to the right of its place (negative: to the left).
+    pub fn set_shift(&self, px: f32) {
+        if self.imp().shift.replace(px) != px {
+            self.queue_draw();
+        }
     }
 
     /// Draws the cover as a record (see the module docs).

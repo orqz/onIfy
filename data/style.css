@@ -223,6 +223,37 @@ glass.rail headerbar {
   padding: 0;
 }
 
+/* A playlist song being dragged over another: where it'll land. */
+.track-row.drop-above {
+  box-shadow: inset 0 2px 0 var(--accent-color);
+}
+
+.track-row.drop-below {
+  box-shadow: inset 0 -2px 0 var(--accent-color);
+}
+
+button.create-playlist {
+  min-width: 26px;
+  min-height: 26px;
+  padding: 0;
+  margin: 0 4px 2px 0;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+button.create-playlist:hover {
+  color: #ffffff;
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+list.add-songs {
+  background: none;
+}
+
+list.add-songs > row {
+  border-radius: 10px;
+  padding: 0 8px;
+}
+
 .sidebar-heading {
   margin: 20px 0 6px 12px;
   font-size: 11px;
