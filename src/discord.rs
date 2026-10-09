@@ -114,10 +114,18 @@ fn connect() -> Option<Stream> {
         .filter_map(|v| std::env::var_os(v).map(Into::into))
         .collect();
     dirs.push("/tmp".into());
-    // Flatpak and Snap builds of Discord put the socket in a subdirectory.
-    let subdirs = ["", "app/com.discordapp.Discord", "app/com.discordapp.DiscordCanary", "snap.discord", ".flatpak/dev.vencord.Vesktop/xdg-run"];
+    // Flatpak and Snap builds of Discord put the socket in a subdirectory;
+    // other Flatpak'd clients keep theirs in their own xdg-run folder.
+    let mut subdirs: Vec<std::path::PathBuf> =
+        ["", "app/com.discordapp.Discord", "app/com.discordapp.DiscordCanary", "snap.discord"].map(Into::into).into();
+    if let Some(runtime) = std::env::var_os("XDG_RUNTIME_DIR") {
+        let flatpaks = std::path::Path::new(&runtime).join(".flatpak");
+        if let Ok(apps) = std::fs::read_dir(flatpaks) {
+            subdirs.extend(apps.flatten().map(|app| std::path::Path::new(".flatpak").join(app.file_name()).join("xdg-run")));
+        }
+    }
     for dir in &dirs {
-        for sub in subdirs {
+        for sub in &subdirs {
             for i in 0..10 {
                 let path = dir.join(sub).join(format!("discord-ipc-{i}"));
                 if let Ok(stream) = Stream::connect(&path) {
