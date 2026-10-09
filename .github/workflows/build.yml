@@ -126,7 +126,10 @@ jobs:
 
             - run: cargo build --release --locked
 
+            # Takes a couple of minutes; on the ARM runner it once hung for the
+            # job's whole hour, so give up early (re-run the job then).
             - name: Bundle GTK
+              timeout-minutes: 15
               run: packaging/windows/bundle.sh
 
             - name: Build installer
