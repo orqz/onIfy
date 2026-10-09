@@ -133,7 +133,7 @@ fn discord_group() -> adw::PreferencesGroup {
     use crate::discord::StatusShows;
     let group = adw::PreferencesGroup::builder()
         .title("Discord")
-        .description("Shows what you're playing on your Discord profile, local files included, with nothing to set up. If Spotify is also connected to your Discord, both may show.")
+        .description("Shows what you're playing on your Discord profile, local files included, with nothing to set up. Showing twice? Spotify is linked to your Discord too: in Discord, Settings → Connections → Spotify, turn off \"Display Spotify as your status\".")
         .build();
     let shared = ctx();
     let (enabled, status) = {

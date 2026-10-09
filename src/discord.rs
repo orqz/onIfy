@@ -11,8 +11,12 @@ use serde_json::{Value, json};
 /// onify's own Discord application (discord.com/developers, named "onify",
 /// with an "onify" art asset), so presence needs no setting up.
 pub const ONIFY_APP: &str = "1558162192652701707";
-/// Where "Get onify" on the presence card leads.
+/// Where onify's badge on the presence card leads.
 const HOME: &str = "https://github.com/orqz/onify";
+/// The badge: onify's logo on a dark disc, served from the repo so it shows
+/// without an image uploaded to the Discord application. (dev is where work
+/// happens and main follows it, so it's always there.)
+const BADGE: &str = "https://raw.githubusercontent.com/orqz/onify/dev/.github/assets/discord.png";
 
 /// What the status line under your name shows while listening.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -203,18 +207,21 @@ fn activity(p: &Presence) -> Value {
         activity["details_url"] = json!(p.track_url);
         activity["assets"]["large_url"] = json!(p.track_url);
     }
-    // The cover with onify's logo in its corner, like Spotify's own badge,
-    // which leads to onify; local files (no cover link) show the logo itself.
+    // The cover with onify's badge in its corner, like Spotify's own icon,
+    // which leads to onify; local files (no cover link) show the badge itself.
     match &p.cover {
         Some(cover) => {
             activity["assets"]["large_image"] = json!(cover);
-            activity["assets"]["small_image"] = json!("onify");
-            activity["assets"]["small_text"] = json!("Listening with onify");
+            activity["assets"]["small_image"] = json!(BADGE);
+            activity["assets"]["small_text"] = json!("onify ↗");
             activity["assets"]["small_url"] = json!(HOME);
         }
         None => {
-            activity["assets"]["large_image"] = json!("onify");
+            activity["assets"]["large_image"] = json!(BADGE);
             activity["assets"]["large_url"] = json!(HOME);
+            if p.album.is_empty() {
+                activity["assets"]["large_text"] = json!("onify ↗");
+            }
         }
     }
     if let Some(url) = &p.artist_url {
