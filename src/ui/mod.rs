@@ -11,6 +11,8 @@ mod lyrics;
 mod pages;
 mod player_bar;
 mod preferences;
+#[cfg(windows)]
+mod thumbbar;
 mod track_row;
 #[cfg(windows)]
 mod tray;

@@ -1,69 +1,17 @@
 //! The system's media controls follow playback: MPRIS on Linux, SMTC (and
-//! the tray icon) on Windows, Now Playing on macOS. Discord gets onify's own
-//! presence when it's switched on (Spotify's own Discord connection works
-//! too, through Spotify). Last.fm hears of plays through Spotify's own
-//! connection, so onify needs nothing for it.
-
-use std::cell::RefCell;
+//! the tray icon) on Windows, Now Playing on macOS. (Discord and Last.fm hear of plays through
+//! Spotify's own connections, so onify needs nothing for them.)
 
 #[cfg(target_os = "linux")]
 use gtk::glib;
 
-use crate::api::{id_of, join_names};
-use crate::discord::{Discord, Presence, StatusShows};
+#[cfg(target_os = "linux")]
+use crate::api::id_of;
 use crate::spotify::NowPlaying;
+#[cfg(not(target_os = "linux"))]
 use super::ctx;
 
-thread_local! {
-    static DISCORD: RefCell<Option<Discord>> = const { RefCell::new(None) };
-}
-
-/// Call after the Discord settings change.
-pub fn discord_settings_changed() {
-    let client_id = ctx().settings.borrow().discord_id();
-    DISCORD.with_borrow(|d| {
-        if let Some(d) = d {
-            d.set_client_id(client_id);
-        }
-    });
-    update_discord();
-}
-
-fn update_discord() {
-    let ctx = ctx();
-    let shows = StatusShows::from_name(&ctx.settings.borrow().discord_status);
-    let presence = ctx.now.borrow().as_ref().filter(|_| ctx.bar.is_playing()).map(|now| Presence {
-        title: now.name.clone(),
-        artist: join_names(&now.artists),
-        album: now.album.clone(),
-        // A local file's cover is a file on this computer; Discord can't show it.
-        cover: now.cover(300).filter(|c| c.starts_with("https://")).map(str::to_owned),
-        track_url: if now.uri.starts_with("spotify:track:") {
-            format!("https://open.spotify.com/track/{}", id_of(&now.uri))
-        } else {
-            String::new()
-        },
-        artist_url: now
-            .artists
-            .first()
-            .filter(|a| a.uri.starts_with("spotify:artist:"))
-            .map(|a| format!("https://open.spotify.com/artist/{}", id_of(&a.uri))),
-        duration_ms: now.duration_ms,
-        position_ms: ctx.bar.position_ms(),
-        playing: true,
-        shows,
-    });
-    DISCORD.with_borrow(|d| {
-        if let Some(d) = d {
-            d.set(presence);
-        }
-    });
-}
-
 pub fn start(window: &gtk::Window) {
-    let client_id = ctx().settings.borrow().discord_id();
-    DISCORD.with_borrow_mut(|d| *d = Some(Discord::start(client_id)));
-
     #[cfg(target_os = "linux")]
     {
         let _ = window;
@@ -88,8 +36,10 @@ pub fn track_changed(now: &NowPlaying) {
     #[cfg(not(target_os = "linux"))]
     crate::media_controls::set_track(now);
     #[cfg(windows)]
-    super::tray::set_track(now);
-    update_discord();
+    {
+        super::tray::set_track(now);
+        super::thumbbar::set_likeable(now.uri.starts_with("spotify:track:"));
+    }
 }
 
 pub fn playing(position_ms: u32) {
@@ -98,8 +48,10 @@ pub fn playing(position_ms: u32) {
     #[cfg(not(target_os = "linux"))]
     crate::media_controls::set_playing(true, position_ms);
     #[cfg(windows)]
-    super::tray::set_playing(true);
-    update_discord();
+    {
+        super::tray::set_playing(true);
+        super::thumbbar::set_playing(true);
+    }
 }
 
 pub fn paused(position_ms: u32) {
@@ -108,8 +60,10 @@ pub fn paused(position_ms: u32) {
     #[cfg(not(target_os = "linux"))]
     crate::media_controls::set_playing(false, position_ms);
     #[cfg(windows)]
-    super::tray::set_playing(false);
-    update_discord();
+    {
+        super::tray::set_playing(false);
+        super::thumbbar::set_playing(false);
+    }
 }
 
 pub fn seeked(position_ms: u32) {
@@ -124,7 +78,6 @@ pub fn seeked(position_ms: u32) {
     }
     #[cfg(not(target_os = "linux"))]
     crate::media_controls::set_playing(ctx().bar.is_playing(), position_ms);
-    update_discord();
 }
 
 #[cfg(target_os = "linux")]

@@ -26,13 +26,6 @@ pub struct Settings {
     pub sidebar_collapsed: bool,
     /// Seconds songs blend into each other; 0 for off.
     pub crossfade: u32,
-    /// Discord: show what's playing on your profile through onify itself.
-    pub discord: bool,
-    /// A Discord application to show presence as instead of onify's own
-    /// (only set by hand in settings.json).
-    pub discord_app_id: String,
-    /// What Discord's status line shows: "song", "artist" or "app".
-    pub discord_status: String,
     /// Performance switches.
     pub animations: bool,
     pub cover_background: bool,
@@ -72,9 +65,6 @@ impl Settings {
             zoom: v["zoom"].as_f64().unwrap_or(1.0).clamp(ZOOM_MIN, ZOOM_MAX),
             sidebar_collapsed: v["sidebar_collapsed"].as_bool().unwrap_or(false),
             crossfade: v["crossfade"].as_u64().unwrap_or(0).min(12) as u32,
-            discord: v["discord"].as_bool().unwrap_or(true),
-            discord_app_id: text("discord_app_id"),
-            discord_status: text("discord_status"),
             animations: v["animations"].as_bool().unwrap_or(true),
             cover_background: v["cover_background"].as_bool().unwrap_or(true),
             hover_preload: v["hover_preload"].as_bool().unwrap_or(true),
@@ -99,9 +89,6 @@ impl Settings {
             "zoom": self.zoom,
             "sidebar_collapsed": self.sidebar_collapsed,
             "crossfade": self.crossfade,
-            "discord": self.discord,
-            "discord_app_id": self.discord_app_id,
-            "discord_status": self.discord_status,
             "animations": self.animations,
             "cover_background": self.cover_background,
             "hover_preload": self.hover_preload,
@@ -109,16 +96,6 @@ impl Settings {
         });
         let _ = std::fs::create_dir_all(crate::spotify::config_dir());
         let _ = std::fs::write(path(), v.to_string());
-    }
-
-    /// The Discord application to show presence as, or empty for none.
-    pub fn discord_id(&self) -> String {
-        let custom = self.discord_app_id.trim();
-        match (self.discord, custom.is_empty()) {
-            (false, _) => String::new(),
-            (true, false) => custom.to_owned(),
-            (true, true) => crate::discord::ONIFY_APP.to_owned(),
-        }
     }
 
     /// Animations, cover background, hover preload, low memory.

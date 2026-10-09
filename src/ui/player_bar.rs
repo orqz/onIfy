@@ -546,6 +546,8 @@ impl PlayerBar {
 
     pub fn set_liked(&self, liked: bool) {
         self.state.borrow_mut().liked = liked;
+        #[cfg(windows)]
+        super::thumbbar::set_liked(liked);
         self.like.set_icon_name(if liked {
             "onify-heart-filled-symbolic"
         } else {

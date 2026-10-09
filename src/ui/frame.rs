@@ -28,14 +28,14 @@ use windows_sys::Win32::System::Threading::CreateMutexW;
 use windows_sys::Win32::UI::Controls::MARGINS;
 use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{TME_LEAVE, TME_NONCLIENT, TRACKMOUSEEVENT, TrackMouseEvent};
-use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
+use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass, THBN_CLICKED};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     ASFW_ANY, AdjustWindowRectEx, AllowSetForegroundWindow, EnumWindows, GWL_EXSTYLE, GWL_STYLE, GetPropW, GetWindowLongPtrW,
     GetWindowRect, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCAPTION, HTCLIENT, HTLEFT, HTMAXBUTTON, HTRIGHT, HTTOP,
     HTTOPLEFT, HTTOPRIGHT, IsIconic, IsZoomed, NCCALCSIZE_PARAMS, PostMessageW, RegisterWindowMessageW, STYLESTRUCT,
     SWP_FRAMECHANGED, SWP_HIDEWINDOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SetPropW,
     SetWindowLongPtrW, SetWindowPos, WINDOWPOS, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_NCACTIVATE, WM_NCCALCSIZE,
-    WM_MOUSEMOVE, WM_NCHITTEST, WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE, WM_NCMOUSEMOVE,
+    WM_COMMAND, WM_MOUSEMOVE, WM_NCHITTEST, WM_NCLBUTTONDBLCLK, WM_NCLBUTTONDOWN, WM_NCLBUTTONUP, WM_NCMOUSELEAVE, WM_NCMOUSEMOVE,
     WM_STYLECHANGING, WM_WINDOWPOSCHANGING, WS_CAPTION, WS_MAXIMIZEBOX, WS_MINIMIZEBOX, WS_POPUP, WS_SYSMENU,
     WS_THICKFRAME,
 };
@@ -283,6 +283,16 @@ unsafe extern "system" fn subclass(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             }
             m if m == show_message() => {
                 glib::idle_add_local_once(super::raise);
+                return 0;
+            }
+            // The buttons under the taskbar preview (thumbbar.rs): the
+            // taskbar button exists now, or one was clicked.
+            m if m == super::thumbbar::created_message() => {
+                glib::idle_add_local_once(move || super::thumbbar::taskbar_button_created(hwnd));
+            }
+            WM_COMMAND if (wparam >> 16) as u32 & 0xffff == THBN_CLICKED => {
+                let id = (wparam & 0xffff) as u32;
+                glib::idle_add_local_once(move || super::thumbbar::clicked(id));
                 return 0;
             }
             _ => {}

@@ -14,7 +14,6 @@ pub fn present(window: &adw::ApplicationWindow) {
     page.add(&playback_group());
     #[cfg(windows)]
     page.add(&window_group());
-    page.add(&discord_group());
     page.add(&performance_group());
     page.add(&local_group());
     page.add(&updates_group(&dialog));
@@ -126,42 +125,6 @@ fn playback_group() -> adw::PreferencesGroup {
         ctx().with_engine(|e| e.set_crossfade(seconds));
     });
     group.add(&crossfade);
-    group
-}
-
-fn discord_group() -> adw::PreferencesGroup {
-    use crate::discord::StatusShows;
-    let group = adw::PreferencesGroup::builder()
-        .title("Discord")
-        .description("Shows what you're playing on your Discord profile, local files included, with nothing to set up. Showing twice? Spotify is linked to your Discord too: in Discord, Settings → Connections → Spotify, turn off \"Display Spotify as your status\".")
-        .build();
-    let shared = ctx();
-    let (enabled, status) = {
-        let settings = shared.settings.borrow();
-        (settings.discord, StatusShows::from_name(&settings.discord_status))
-    };
-    let show = switch("Show on Discord", "Listening to… with the cover, artist and time left", enabled, |on| {
-        ctx().settings.borrow_mut().discord = on;
-        super::integrations::discord_settings_changed();
-    });
-    group.add(&show);
-
-    let labels: Vec<&str> = StatusShows::ALL.iter().map(|s| s.label()).collect();
-    let shows = adw::ComboRow::builder()
-        .title("Status Shows")
-        .subtitle("What \"Listening to\" says under your name")
-        .model(&gtk::StringList::new(&labels))
-        .selected(StatusShows::ALL.iter().position(|s| *s == status).unwrap_or(0) as u32)
-        .build();
-    shows.connect_selected_notify(|row| {
-        let shows = StatusShows::ALL.get(row.selected() as usize).copied().unwrap_or_default();
-        ctx().settings.borrow_mut().discord_status = shows.name().to_owned();
-        save();
-        super::integrations::discord_settings_changed();
-    });
-    group.add(&shows);
-
-    show.bind_property("active", &shows, "sensitive").sync_create().build();
     group
 }
 
