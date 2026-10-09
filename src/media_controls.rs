@@ -59,8 +59,8 @@ fn handle(event: MediaControlEvent) {
         MediaControlEvent::Toggle => ui::play_pause(),
         MediaControlEvent::Play if !bar.is_playing() => ui::play_pause(),
         MediaControlEvent::Pause | MediaControlEvent::Stop if bar.is_playing() => ui::play_pause(),
-        MediaControlEvent::Next => ctx().with_engine(|e| e.next()),
-        MediaControlEvent::Previous => ctx().with_engine(|e| e.prev()),
+        MediaControlEvent::Next => ui::next(),
+        MediaControlEvent::Previous => ui::prev(),
         MediaControlEvent::Seek(direction) | MediaControlEvent::SeekBy(direction, _) => {
             let by = match event {
                 MediaControlEvent::SeekBy(_, by) => by.as_millis() as i64,

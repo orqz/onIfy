@@ -8,12 +8,14 @@ use librespot_core as core;
 use librespot_playback as playback;
 use librespot_protocol as protocol;
 
+mod cluster;
 mod context_resolver;
 mod model;
 mod shuffle_vec;
 mod spirc;
 mod state;
 
+pub use cluster::*;
 pub use model::*;
 pub use spirc::*;
 pub use state::*;

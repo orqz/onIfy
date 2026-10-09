@@ -59,6 +59,10 @@ pub struct PlayerBar {
     progress: gtk::Scale,
     total: gtk::Label,
     volume_button: gtk::Button,
+    /// Spotify Connect: pick the device to play on.
+    devices: gtk::MenuButton,
+    /// "Playing on Kitchen Speaker", while another device plays.
+    playing_on: gtk::Label,
     volume: gtk::Scale,
     /// In narrow windows the slider hides; hovering the volume icon pops up
     /// this one instead.
@@ -184,8 +188,25 @@ impl PlayerBar {
         center.append(&buttons);
         center.append(&timeline);
 
-        // Right: lyrics and volume.
+        // Right: where it plays, lyrics and volume.
         let side_end = gtk::Box::builder().spacing(4).halign(gtk::Align::End).build();
+        let playing_on = gtk::Label::builder()
+            .ellipsize(gtk::pango::EllipsizeMode::End)
+            .max_width_chars(22)
+            .visible(false)
+            .build();
+        playing_on.add_css_class("playing-on");
+        side_end.append(&playing_on);
+        let devices = gtk::MenuButton::builder()
+            .icon_name("onify-devices-symbolic")
+            .tooltip_text("Connect to a device")
+            .valign(gtk::Align::Center)
+            .popover(&super::devices::picker())
+            .build();
+        devices.add_css_class("flat");
+        devices.add_css_class("circular");
+        devices.add_css_class("devices-button");
+        side_end.append(&devices);
         let lyrics = icon_button("onify-lyrics-symbolic", "Lyrics");
         lyrics.connect_clicked(|_| super::toggle_lyrics());
         side_end.append(&lyrics);
@@ -232,6 +253,8 @@ impl PlayerBar {
             progress,
             total,
             volume_button,
+            devices,
+            playing_on,
             volume,
             volume_pop,
             pop_volume,
@@ -260,8 +283,8 @@ impl PlayerBar {
             }
         };
         self.play.connect_clicked(with(|bar| bar.toggle_play()));
-        prev.connect_clicked(with(|_| ctx().with_engine(|e| e.prev())));
-        next.connect_clicked(with(|_| ctx().with_engine(|e| e.next())));
+        prev.connect_clicked(with(|_| super::prev()));
+        next.connect_clicked(with(|_| super::next()));
         self.shuffle.connect_clicked(with(|bar| bar.toggle_shuffle()));
         self.repeat.connect_clicked(with(|bar| {
             let (context, track) = {
@@ -275,7 +298,12 @@ impl PlayerBar {
                 (false, false) => (true, false),
             };
             bar.set_repeat(context, track);
-            ctx().with_engine(|e| e.set_repeat(context, track));
+            if super::devices::is_remote() {
+                super::devices::command("set_repeating_context", serde_json::json!({ "value": context }));
+                super::devices::command("set_repeating_track", serde_json::json!({ "value": track }));
+            } else {
+                ctx().with_engine(|e| e.set_repeat(context, track));
+            }
         }));
         self.like.connect_clicked(with(|bar| bar.toggle_like()));
         self.volume_button.connect_clicked(with(|bar| bar.toggle_mute()));
@@ -430,11 +458,15 @@ impl PlayerBar {
             (st.has_track, st.playing)
         };
         if !has_track {
-            ctx().with_engine(|e| e.take_over());
+            super::resume_or_take_over();
             return;
         }
         // Answer the click immediately; the player confirms a moment later.
         self.set_playing(!playing, self.position_ms());
+        if super::devices::is_remote() {
+            super::devices::command(if playing { "pause" } else { "resume" }, serde_json::json!({}));
+            return;
+        }
         ctx().with_engine(|e| if playing { e.pause() } else { e.play() });
     }
 
@@ -448,7 +480,7 @@ impl PlayerBar {
             st.position_ms = ms;
             st.at = now_us();
         }
-        ctx().with_engine(|e| e.seek(ms));
+        super::seek_to(ms as i64);
         self.schedule();
     }
 
@@ -460,10 +492,19 @@ impl PlayerBar {
         // Heard at once; Spotify (and other devices) get one update when the
         // slider stops, instead of one per pixel.
         let volume = (value * u16::MAX as f64).round() as u16;
-        ctx().output.set_volume(volume);
         if let Some(id) = self.volume_debounce.take() {
             id.remove();
         }
+        // Another device playing: the slider is its volume.
+        if super::devices::is_remote() {
+            let id = glib::timeout_add_local_once(Duration::from_millis(250), move || {
+                ctx().bar.volume_debounce.take();
+                super::devices::set_volume(volume);
+            });
+            self.volume_debounce.replace(Some(id));
+            return;
+        }
+        ctx().output.set_volume(volume);
         let id = glib::timeout_add_local_once(Duration::from_millis(250), move || {
             let ctx = ctx();
             ctx.bar.volume_debounce.take();
@@ -585,6 +626,14 @@ impl PlayerBar {
         self.schedule();
     }
 
+    /// Last time's song, shown paused at `position_ms`; Play picks it up
+    /// from there (ui::resume_or_take_over).
+    pub fn set_resumable(&self, now: &NowPlaying, position_ms: u32) {
+        self.set_track(now);
+        self.state.borrow_mut().has_track = false;
+        self.set_playing(false, position_ms);
+    }
+
     pub fn set_playing(&self, playing: bool, position_ms: u32) {
         // A little pop when it flips between play and pause.
         if self.state.borrow().playing != playing {
@@ -667,7 +716,27 @@ impl PlayerBar {
     pub fn toggle_shuffle(&self) {
         let shuffle = !self.state.borrow().shuffle;
         self.set_shuffle(shuffle);
-        ctx().with_engine(|e| e.set_shuffle(shuffle));
+        if super::devices::is_remote() {
+            super::devices::command("set_shuffling_context", serde_json::json!({ "value": shuffle }));
+        } else {
+            ctx().with_engine(|e| e.set_shuffle(shuffle));
+        }
+    }
+
+    /// Another device is playing (its name), or this one again (None).
+    pub fn set_remote(&self, device: Option<&str>) {
+        match device {
+            Some(name) => {
+                self.playing_on.set_label(&format!("Playing on {name}"));
+                self.playing_on.set_tooltip_text(Some(&format!("Playing on {name}")));
+                self.playing_on.set_visible(true);
+                self.devices.add_css_class("active");
+            }
+            None => {
+                self.playing_on.set_visible(false);
+                self.devices.remove_css_class("active");
+            }
+        }
     }
 
     /// Lights `button` up whenever shuffle is on.

@@ -114,6 +114,8 @@ pub struct Track {
     pub number: u32,
     /// Streams, where Spotify reports them (an artist's popular songs).
     pub plays: u64,
+    /// Where it sits in its list, from 1 (set when listed; see track_row::objects).
+    pub position: u32,
 }
 
 impl Track {
@@ -151,6 +153,7 @@ impl Track {
             playable: true,
             number: 0,
             plays: 0,
+            position: 0,
         })
     }
 
@@ -202,6 +205,7 @@ impl Track {
                 .and_then(|p| p.parse().ok())
                 .or(t["playcount"].as_u64())
                 .unwrap_or(0),
+            position: 0,
             uri,
         })
     }
@@ -289,6 +293,31 @@ impl Card {
     }
 }
 
+impl Card {
+    /// A release in an artist's discography, which (unlike everywhere else)
+    /// comes without a `__typename`: "2026 • Single".
+    fn release(d: &Value) -> Option<Self> {
+        let (uri, name) = (str_of(&d["uri"]), str_of(&d["name"]));
+        if !uri.starts_with("spotify:album:") || name.is_empty() {
+            return None;
+        }
+        let kind = match d["type"].as_str() {
+            Some("SINGLE") => "Single",
+            Some("EP") => "EP",
+            Some("COMPILATION") => "Compilation",
+            _ => "Album",
+        };
+        let year = d["date"]["year"].as_u64().map(|y| y.to_string()).unwrap_or_default();
+        Some(Self {
+            kind: Kind::Album,
+            uri,
+            name,
+            subtitle: [year, kind.to_owned()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" • "),
+            images: Images::parse(&d["coverArt"]["sources"]),
+        })
+    }
+}
+
 /// A song's lyrics: each line with the time it starts, if they're synced.
 #[derive(Debug, Clone)]
 pub struct Lyrics {
@@ -322,6 +351,10 @@ pub struct ArtistPage {
     pub monthly_listeners: u64,
     pub images: Images,
     pub top: Vec<Track>,
+    /// The newest album, single or EP.
+    pub latest: Option<Card>,
+    /// Releases people play most, albums and singles alike.
+    pub popular: Vec<Card>,
     pub albums: Vec<Card>,
     pub singles: Vec<Card>,
 }
@@ -580,24 +613,24 @@ impl Api {
             )
             .await?;
         let a = &v["artistUnion"];
+        let d = &a["discography"];
         let releases = |v: &Value| -> Vec<Card> {
             v["items"]
                 .as_array()
                 .into_iter()
                 .flatten()
-                .filter_map(|i| Card::parse(&i["releases"]["items"][0]))
+                .filter_map(|i| Card::release(&i["releases"]["items"][0]))
                 .collect()
         };
-        let mut albums = releases(&a["discography"]["albums"]);
+        let popular: Vec<Card> =
+            d["popularReleasesAlbums"]["items"].as_array().into_iter().flatten().filter_map(Card::release).collect();
+        let mut albums = releases(&d["albums"]);
         if albums.is_empty() {
-            albums = a["discography"]["popularReleasesAlbums"]["items"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(Card::parse)
-                .collect();
+            albums = popular.iter().filter(|c| c.subtitle.ends_with("Album")).cloned().collect();
         }
         Ok(ArtistPage {
+            latest: Card::release(&d["latest"]),
+            popular,
             name: str_of(&a["profile"]["name"]),
             followers: a["stats"]["followers"].as_u64().unwrap_or(0),
             monthly_listeners: a["stats"]["monthlyListeners"].as_u64().unwrap_or(0),
@@ -609,7 +642,7 @@ impl Api {
                 .filter_map(|i| Track::parse(&i["track"], None))
                 .collect(),
             albums,
-            singles: releases(&a["discography"]["singles"]),
+            singles: releases(&d["singles"]),
         })
     }
 
@@ -779,6 +812,61 @@ impl Api {
                 None,
                 Some(&body.to_string()),
             )
+            .await
+            .map(drop)
+            .map_err(|e| e.to_string())
+    }
+
+    /// Sends a Spotify Connect command to another of the account's devices:
+    /// "pause", "resume", "skip_next", "skip_prev", "seek_to" (with "value"),
+    /// "set_shuffling_context" / "set_repeating_*" (with a bool "value").
+    pub async fn remote(&self, to: &str, endpoint: &str, extra: Value) -> Result<()> {
+        let me = self.session()?.device_id().to_owned();
+        let mut command = json!({ "endpoint": endpoint, "logging_params": {} });
+        if let (Some(command), Some(extra)) = (command.as_object_mut(), extra.as_object()) {
+            command.extend(extra.clone());
+        }
+        let body = json!({ "command": command });
+        self.session()?
+            .spclient()
+            .request_as_json(
+                &Method::POST,
+                &format!("/connect-state/v1/player/command/from/{me}/to/{to}"),
+                None,
+                Some(&body.to_string()),
+            )
+            .await
+            .map(drop)
+            .map_err(|e| e.to_string())
+    }
+
+    /// Sets another device's volume (0 to 65535).
+    pub async fn remote_volume(&self, to: &str, volume: u16) -> Result<()> {
+        let me = self.session()?.device_id().to_owned();
+        let body = json!({ "volume": volume });
+        self.session()?
+            .spclient()
+            .request_as_json(
+                &Method::PUT,
+                &format!("/connect-state/v1/connect/volume/from/{me}/to/{to}"),
+                None,
+                Some(&body.to_string()),
+            )
+            .await
+            .map(drop)
+            .map_err(|e| e.to_string())
+    }
+
+    /// Moves playback from one device to another, paused or playing as it was.
+    pub async fn transfer(&self, from: &str, to: &str) -> Result<()> {
+        use librespot_core::dealer::protocol::TransferOptions;
+        use librespot_core::spclient::TransferRequest;
+        let request = TransferRequest {
+            transfer_options: TransferOptions { restore_paused: Some("restore".into()), ..Default::default() },
+        };
+        self.session()?
+            .spclient()
+            .transfer(from, to, Some(&request))
             .await
             .map(drop)
             .map_err(|e| e.to_string())

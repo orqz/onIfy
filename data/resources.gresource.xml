@@ -27,6 +27,15 @@
     <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-settings-symbolic.svg">icons/onify-settings-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-playing-symbolic.svg">icons/onify-playing-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-system-search-symbolic.svg">icons/onify-system-search-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-go-next-symbolic.svg">icons/onify-go-next-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-go-previous-symbolic.svg">icons/onify-go-previous-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-view-more-symbolic.svg">icons/onify-view-more-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-sidebar-symbolic.svg">icons/onify-sidebar-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-computer-symbolic.svg">icons/onify-computer-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-phone-symbolic.svg">icons/onify-phone-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-speaker-symbolic.svg">icons/onify-speaker-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-tv-symbolic.svg">icons/onify-tv-symbolic.svg</file>
+    <file preprocess="xml-stripblanks" alias="icons/scalable/actions/onify-devices-symbolic.svg">icons/onify-devices-symbolic.svg</file>
     <file preprocess="xml-stripblanks" alias="icons/scalable/apps/io.github.orqz.onIfy.svg">icons/io.github.orqz.onIfy.svg</file>
   </gresource>
 </gresources>

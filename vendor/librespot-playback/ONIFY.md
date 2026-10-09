@@ -9,3 +9,8 @@ src/player.rs: the next song is preloaded as soon as the current one is fully do
 so skips start instantly.
 src/local_file.rs: files without artist/title tags also answer to URIs named after the file
 ("Artist - Title" when the name reads like that), and untagged files are no longer skipped.
+src/player.rs: crossfade (Player::set_crossfade): near the end of a song, the next song (the
+one Spirc preloads with Player::preload_next, never a hover preload) decodes alongside it and
+is mixed in with equal-power curves; when the song ends, the next one takes over from where
+the fade got to (its unmixed decoded audio plays first). Seeking, stopping or loading
+something else calls the fade off and puts the next song back as preloaded.

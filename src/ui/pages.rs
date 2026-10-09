@@ -74,13 +74,11 @@ struct Glide {
     tick: gtk::TickCallbackId,
 }
 
-/// Windows: a mouse wheel moves in whole notches and GTK jumps each one at
-/// once (about 90px), which reads as stutter; other Windows apps glide a
-/// notch instead, so this does too. Touchpads already scroll smoothly.
+/// A mouse wheel moves in whole notches and GTK jumps each one at once (about
+/// 90px), which reads as stutter, worse the higher the screen's refresh rate
+/// (frames are smooth, the content just leaps). Browsers glide a notch
+/// instead, so this does too. Touchpads already scroll smoothly.
 pub fn glide_wheel(scroller: &gtk::ScrolledWindow) {
-    if !cfg!(windows) {
-        return;
-    }
     let glide: Rc<RefCell<Option<Glide>>> = Rc::default();
     let wheel = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
     wheel.set_propagation_phase(gtk::PropagationPhase::Capture);
@@ -420,7 +418,7 @@ pub fn card(card: &Card) -> gtk::Widget {
 
 const CARD: i32 = 164;
 
-/// A titled row of cards that scrolls sideways.
+/// A titled row of cards that scrolls sideways, with arrows at its ends.
 fn carousel(title: &str, cards: &[Card]) -> Option<gtk::Box> {
     if cards.is_empty() {
         return None;
@@ -429,7 +427,8 @@ fn carousel(title: &str, cards: &[Card]) -> Option<gtk::Box> {
     let heading = label(title, &["title-section"]);
     heading.add_css_class("gutter");
     section.append(&heading);
-    let row = gtk::Box::builder().spacing(4).build();
+    // Packed to the left: wide windows used to spread a short row out.
+    let row = gtk::Box::builder().spacing(4).halign(gtk::Align::Start).build();
     row.add_css_class("gutter-inset");
     for c in cards {
         row.append(&card(c));
@@ -441,8 +440,65 @@ fn carousel(title: &str, cards: &[Card]) -> Option<gtk::Box> {
         .child(&row)
         .build();
     scroller.add_css_class("carousel");
-    section.append(&scroller);
+    let shelf = gtk::Overlay::builder().child(&scroller).build();
+    shelf.add_css_class("shelf");
+    let back = shelf_arrow("onify-go-previous-symbolic", "Back", gtk::Align::Start, &scroller, -1.0);
+    let forward = shelf_arrow("onify-go-next-symbolic", "More", gtk::Align::End, &scroller, 1.0);
+    shelf.add_overlay(&back);
+    shelf.add_overlay(&forward);
+    // Each arrow shows only while there's more that way.
+    let adj = scroller.hadjustment();
+    let update = glib::clone!(
+        #[weak]
+        back,
+        #[weak]
+        forward,
+        move |adj: &gtk::Adjustment| {
+            back.set_visible(adj.value() > adj.lower() + 1.0);
+            forward.set_visible(adj.value() < adj.upper() - adj.page_size() - 1.0);
+        }
+    );
+    update(&adj);
+    adj.connect_value_changed(update.clone());
+    adj.connect_changed(update);
+    section.append(&shelf);
     Some(section)
+}
+
+/// A round arrow over one end of a carousel that slides it a screenful.
+fn shelf_arrow(icon: &str, tooltip: &str, side: gtk::Align, scroller: &gtk::ScrolledWindow, direction: f64) -> gtk::Button {
+    let button = gtk::Button::from_icon_name(icon);
+    button.add_css_class("shelf-arrow");
+    button.add_css_class("circular");
+    button.set_tooltip_text(Some(tooltip));
+    button.set_halign(side);
+    button.set_valign(gtk::Align::Start);
+    // Level with the middle of the covers (cards have 12px of padding).
+    button.set_margin_top(12 + CARD / 2 - 20);
+    button.set_margin_start(12);
+    button.set_margin_end(12);
+    button.set_visible(false);
+    let slide: Rc<RefCell<Option<adw::TimedAnimation>>> = Rc::default();
+    button.connect_clicked(glib::clone!(
+        #[weak]
+        scroller,
+        move |_| {
+            let adj = scroller.hadjustment();
+            let end = (adj.upper() - adj.page_size()).max(adj.lower());
+            // Whole cards: a screenful less one card, so the last one
+            // seen stays in view as a landmark.
+            let step = ((adj.page_size() / (CARD + 28) as f64).floor() - 1.0).max(1.0) * (CARD + 28) as f64;
+            let to = (adj.value() + direction * step).clamp(adj.lower(), end);
+            let target = adw::PropertyAnimationTarget::new(&adj, "value");
+            let animation = adw::TimedAnimation::new(&scroller, adj.value(), to, 380, target);
+            animation.set_easing(adw::Easing::EaseOutCubic);
+            animation.play();
+            if let Some(old) = slide.replace(Some(animation)) {
+                old.pause();
+            }
+        }
+    ));
+    button
 }
 
 /// Home's quick picks: compact tiles in a grid.
@@ -779,7 +835,8 @@ fn load_tracks(kind: Kind, uri: &str) -> Rc<Loaded> {
                     set_header(&loaded, header);
                 }
                 let uris = tracks.iter().map(|t| t.uri.clone()).collect();
-                loaded.store.extend_from_slice(&objects(tracks));
+                note_liked(kind, &tracks);
+                loaded.store.extend_from_slice(&objects(tracks, 0));
                 Some(uris)
             }
             _ => None,
@@ -804,9 +861,10 @@ fn load_tracks(kind: Kind, uri: &str) -> Rc<Loaded> {
                     if let Some(header) = header {
                         set_header(&loaded, header);
                     }
+                    note_liked(kind, &tracks);
                     if tracks.iter().map(|t| &t.uri).ne(uris.iter()) {
                         let n = loaded.store.n_items();
-                        loaded.store.splice(1, n.saturating_sub(1), &objects(tracks));
+                        loaded.store.splice(1, n.saturating_sub(1), &objects(tracks, 0));
                     }
                 }
             }
@@ -818,7 +876,11 @@ fn load_tracks(kind: Kind, uri: &str) -> Rc<Loaded> {
                     let Some(loaded) = weak.upgrade() else { return };
                     match chunk {
                         Chunk::Header(header) => set_header(&loaded, header),
-                        Chunk::Tracks(tracks) => loaded.store.extend_from_slice(&objects(tracks)),
+                        Chunk::Tracks(tracks) => {
+                            note_liked(kind, &tracks);
+                            let listed = loaded.store.n_items().saturating_sub(1);
+                            loaded.store.extend_from_slice(&objects(tracks, listed));
+                        }
                         Chunk::Failed(e) => {
                             ctx().stores.borrow_mut().remove(&key);
                             super::toast(&format!("Couldn't load: {e}"));
@@ -830,6 +892,13 @@ fn load_tracks(kind: Kind, uri: &str) -> Rc<Loaded> {
         crate::memory::trim_soon();
     });
     loaded
+}
+
+/// Everything in Liked Songs is liked: their hearts show without asking.
+fn note_liked(kind: Kind, tracks: &[Track]) {
+    if kind == Kind::Liked {
+        super::track_row::set_known_liked(tracks.iter().map(|t| t.uri.clone()), true);
+    }
 }
 
 fn set_header(loaded: &Loaded, header: Header) {
@@ -869,7 +938,7 @@ fn scan_local(loaded: &Rc<Loaded>) {
             artists: Vec::new(),
         };
         set_header(&loaded, header);
-        loaded.store.extend_from_slice(&objects(tracks));
+        loaded.store.extend_from_slice(&objects(tracks, 0));
     });
 }
 
@@ -978,9 +1047,29 @@ pub fn tracks_page(kind: Kind, uri: &str, title: &str, images: &Images) -> adw::
         }
     };
 
+    // Find in this list: songs whose title, artists or album contain what's
+    // typed (the header slot always stays).
+    let query: Rc<RefCell<String>> = Rc::default();
+    let filter = gtk::CustomFilter::new(glib::clone!(
+        #[strong]
+        query,
+        move |item| {
+            let query = query.borrow();
+            if query.is_empty() {
+                return true;
+            }
+            let Some(object) = item.downcast_ref::<glib::BoxedAnyObject>() else { return true };
+            match object.try_borrow::<Track>() {
+                Ok(track) => matches_query(&track, &query),
+                Err(_) => true,
+            }
+        }
+    ));
+    let shown = gtk::FilterListModel::new(Some(loaded.store.clone()), Some(filter.clone()));
+
     // A click selects a song (and shows its play count); its ▶ button on
     // hover, a double-click or Enter plays it.
-    let selection = gtk::SingleSelection::new(Some(loaded.store.clone()));
+    let selection = gtk::SingleSelection::new(Some(shown.clone()));
     selection.set_autoselect(false);
     selection.set_can_unselect(true);
     selection.connect_selected_item_notify(|selection| {
@@ -997,16 +1086,19 @@ pub fn tracks_page(kind: Kind, uri: &str, title: &str, images: &Images) -> adw::
     list.add_css_class("tracks");
     let store = loaded.store.clone();
     let ctx_uri = context.clone();
-    list.connect_activate(move |_, position| {
-        let Some(object) = store.item(position).and_downcast::<glib::BoxedAnyObject>() else { return };
+    list.connect_activate(move |list, position| {
+        let Some(object) = list.model().and_then(|m| m.item(position)).and_downcast::<glib::BoxedAnyObject>() else {
+            return;
+        };
         let Ok(track) = object.try_borrow::<Track>() else { return };
         if !track.playable {
             return;
         }
         if kind == Kind::Local {
-            // The header sits at position 0, so songs start at 1.
+            // By uri: while finding, positions are the filtered list's.
             let uris = track_uris(&store);
-            ctx().with_engine(|e| e.play_list(uris, Some(position as usize - 1), None));
+            let index = uris.iter().position(|u| *u == track.uri);
+            ctx().with_engine(|e| e.play_list(uris, index, None));
         } else {
             ctx().with_engine(|e| e.play_context(&ctx_uri, Some(&track.uri), None));
         }
@@ -1019,6 +1111,7 @@ pub fn tracks_page(kind: Kind, uri: &str, title: &str, images: &Images) -> adw::
     let scroller = scrolled(&list);
     let header = fading_header(title, &scroller.vadjustment(), 200.0);
     let window_title = header.title_widget().and_downcast::<adw::WindowTitle>().map(|t| t.downgrade());
+    let find = find_in_list(&header, kind, &query, &filter, &scroller);
     let update = move |h: &Header| {
         apply_header(h);
         if let Some(t) = window_title.as_ref().and_then(|w| w.upgrade()) {
@@ -1034,10 +1127,122 @@ pub fn tracks_page(kind: Kind, uri: &str, title: &str, images: &Images) -> adw::
     }
     let tag = if kind == Kind::Liked { "liked" } else { uri };
     let page = page(title, tag, &scroller, &header);
+    FINDERS.with_borrow_mut(|finders| {
+        finders.retain(|(p, _)| p.upgrade().is_some());
+        finders.push((page.downgrade(), find.downgrade()));
+    });
     if let Some(record) = record {
         slide_out_on_show(&page, &record);
     }
     page
+}
+
+thread_local! {
+    /// Each track list page's find button, for Ctrl+F.
+    static FINDERS: RefCell<Vec<(glib::WeakRef<adw::NavigationPage>, glib::WeakRef<gtk::ToggleButton>)>> =
+        const { RefCell::new(Vec::new()) };
+}
+
+/// Ctrl+F: opens the visible page's find field. False if the page has none.
+pub fn find_on(page: &adw::NavigationPage) -> bool {
+    let find = FINDERS.with_borrow(|finders| {
+        finders.iter().find(|(p, _)| p.upgrade().as_ref() == Some(page)).and_then(|(_, f)| f.upgrade())
+    });
+    match find {
+        Some(find) => {
+            find.set_active(false);
+            find.set_active(true);
+            true
+        }
+        None => false,
+    }
+}
+
+/// Whether a song's title, artists or album contain `query` (lowercase).
+fn matches_query(track: &Track, query: &str) -> bool {
+    track.name.to_lowercase().contains(query)
+        || track.album.name.to_lowercase().contains(query)
+        || track.artists.iter().any(|a| a.name.to_lowercase().contains(query))
+}
+
+/// A find button in the page's header that swaps the title for a search
+/// field; typing narrows the list, Escape or the button again closes it.
+fn find_in_list(
+    header: &adw::HeaderBar,
+    kind: Kind,
+    query: &Rc<RefCell<String>>,
+    filter: &gtk::CustomFilter,
+    scroller: &gtk::ScrolledWindow,
+) -> gtk::ToggleButton {
+    let what = match kind {
+        Kind::Album => "this album",
+        Kind::Liked => "Liked Songs",
+        Kind::Local => "Local Files",
+        _ => "this playlist",
+    };
+    let toggle = gtk::ToggleButton::builder()
+        .icon_name("onify-system-search-symbolic")
+        .tooltip_text(format!("Find in {what} (Ctrl+F)"))
+        .build();
+    header.pack_end(&toggle);
+    let entry = gtk::SearchEntry::builder().placeholder_text(format!("Find in {what}")).hexpand(true).build();
+    entry.add_css_class("search-pill");
+    let clamp = adw::Clamp::builder().maximum_size(420).child(&entry).build();
+    let titles = gtk::Stack::builder()
+        .transition_type(gtk::StackTransitionType::Crossfade)
+        .transition_duration(140)
+        .hhomogeneous(false)
+        .build();
+    if let Some(title) = header.title_widget() {
+        header.set_title_widget(None::<&gtk::Widget>);
+        titles.add_named(&title, Some("title"));
+    }
+    titles.add_named(&clamp, Some("find"));
+    header.set_title_widget(Some(&titles));
+
+    toggle.connect_toggled(glib::clone!(
+        #[weak]
+        entry,
+        #[weak]
+        titles,
+        move |toggle| {
+            if toggle.is_active() {
+                titles.set_visible_child_name("find");
+                entry.grab_focus();
+            } else {
+                entry.set_text("");
+                titles.set_visible_child_name("title");
+            }
+        }
+    ));
+    entry.connect_search_changed(glib::clone!(
+        #[strong]
+        query,
+        #[weak]
+        filter,
+        #[weak]
+        scroller,
+        move |entry| {
+            let text = entry.text().trim().to_lowercase();
+            if *query.borrow() == text {
+                return;
+            }
+            let narrower = text.contains(query.borrow().as_str());
+            query.replace(text);
+            filter.changed(if narrower { gtk::FilterChange::MoreStrict } else { gtk::FilterChange::Different });
+            // Matches start right under the header.
+            let adj = scroller.vadjustment();
+            if adj.value() > 0.0 {
+                adj.set_value(0.0);
+            }
+        }
+    ));
+    entry.connect_stop_search(glib::clone!(
+        #[weak]
+        toggle,
+        move |_| toggle.set_active(false)
+    ));
+    toggle
 }
 
 /// The record slides out of its sleeve each time the page comes into view.
@@ -1079,14 +1284,32 @@ pub fn artist_page(card: &Card) -> adw::NavigationPage {
     let loading = spinner();
     body.append(&loading);
 
+    // Popular songs with the latest release beside them, like search's top
+    // result: side by side while there's room, stacked when there isn't.
+    let top = gtk::Box::builder().spacing(4).css_classes(["gutter-inset"]).visible(false).build();
+    let popular = vbox(12);
+    popular.set_hexpand(true);
+    let latest = vbox(12);
+    latest.set_width_request(300);
+    latest.set_margin_start(12);
+    latest.set_margin_end(12);
+    top.append(&popular);
+    top.append(&latest);
+    body.append(&top);
+
     let id = card.id().to_owned();
     let artist_uri = card.uri.clone();
     let (body_weak, avatar_weak) = (body.downgrade(), avatar.downgrade());
     let (title, subtitle) = (hero.title.clone(), hero.subtitle.clone());
+    let (top_weak, popular_weak, latest_weak) = (top.downgrade(), popular.downgrade(), latest.downgrade());
     if let Some(api) = ctx().api() {
         glib::spawn_future_local(async move {
             let artist = rt::spawn(async move { api.artist(&id).await }).await;
             let (Some(body), Some(avatar)) = (body_weak.upgrade(), avatar_weak.upgrade()) else { return };
+            let (Some(top), Some(popular), Some(latest)) = (top_weak.upgrade(), popular_weak.upgrade(), latest_weak.upgrade())
+            else {
+                return;
+            };
             body.remove(&loading);
             let artist = match artist {
                 Ok(a) => a,
@@ -1103,22 +1326,30 @@ pub fn artist_page(card: &Card) -> adw::NavigationPage {
             } else if artist.followers > 0 {
                 subtitle.set_label(&format!("{} followers", group_digits(artist.followers)));
             }
+            popular.set_visible(!artist.top.is_empty());
             if !artist.top.is_empty() {
-                let popular = vbox(12);
                 let heading = label("Popular", &["title-section"]);
-                heading.add_css_class("gutter");
+                heading.set_margin_start(12);
                 popular.append(&heading);
-                let top: Vec<Track> = artist.top.iter().take(10).cloned().collect();
-                let uris = top.clone();
-                let list = short_list(&top, RowMode::Compact, move |i| {
+                let tracks: Vec<Track> = artist.top.iter().take(10).cloned().collect();
+                let uris = tracks.clone();
+                let list = short_list(&tracks, RowMode::Compact, move |i| {
                     let uri = uris[i].uri.clone();
                     ctx().with_engine(|e| e.play_context(&artist_uri, Some(&uri), None));
                 });
-                list.add_css_class("gutter-inset");
                 popular.append(&list);
-                body.append(&popular);
             }
-            for (title, cards) in [("Albums", &artist.albums), ("Singles and EPs", &artist.singles)] {
+            latest.set_visible(artist.latest.is_some());
+            if let Some(release) = &artist.latest {
+                latest.append(&label("Latest release", &["title-section"]));
+                latest.append(&release_tile(release));
+            }
+            top.set_visible(!artist.top.is_empty() || artist.latest.is_some());
+            for (title, cards) in [
+                ("Popular releases", &artist.popular),
+                ("Albums", &artist.albums),
+                ("Singles and EPs", &artist.singles),
+            ] {
                 if let Some(section) = carousel(title, cards) {
                     body.append(&section);
                 }
@@ -1128,5 +1359,37 @@ pub fn artist_page(card: &Card) -> adw::NavigationPage {
 
     let scroller = scrolled(&body);
     let header = fading_header(&card.name, &scroller.vadjustment(), 200.0);
-    page(&card.name, &card.uri, &scroller, &header)
+    // Judged by the page's own width, since the sidebar takes a share.
+    let bin = adw::BreakpointBin::builder().width_request(240).height_request(200).child(&scroller).build();
+    let narrow = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 800sp").unwrap());
+    narrow.add_setter(&top, "orientation", Some(&gtk::Orientation::Vertical.to_value()));
+    narrow.add_setter(&top, "spacing", Some(&28.to_value()));
+    narrow.add_setter(&latest, "width-request", Some(&(-1).to_value()));
+    bin.add_breakpoint(narrow);
+    page(&card.name, &card.uri, &bin, &header)
+}
+
+/// An artist's latest release: its cover beside the name and what it is.
+fn release_tile(card: &Card) -> gtk::Widget {
+    let button = gtk::Button::new();
+    button.add_css_class("top-result");
+    let content = gtk::Box::builder().spacing(18).build();
+    let cover = Cover::new(112, 12.0);
+    cover.set_url(card.images.pick(300));
+    content.append(&cover);
+    let text = gtk::Box::builder().orientation(gtk::Orientation::Vertical).valign(gtk::Align::Center).spacing(8).build();
+    let name = label(&card.name, &["title-section"]);
+    name.set_wrap(true);
+    name.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+    name.set_lines(2);
+    name.set_max_width_chars(1);
+    name.set_hexpand(true);
+    text.append(&name);
+    text.append(&label(&card.subtitle, &["card-subtitle"]));
+    content.append(&text);
+    button.set_child(Some(&content));
+    button.set_tooltip_text(Some(&card.name));
+    let card = card.clone();
+    button.connect_clicked(move |_| open_card(&card));
+    button.upcast()
 }

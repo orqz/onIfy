@@ -10,7 +10,7 @@ use std::{
     sync::Mutex,
     sync::{
         Arc,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU32, AtomicUsize, Ordering},
     },
     task::{Context, Poll},
     thread,
@@ -57,6 +57,8 @@ pub type PlayerResult = Result<(), Error>;
 pub struct Player {
     commands: Option<mpsc::UnboundedSender<PlayerCommand>>,
     thread_handle: Option<thread::JoinHandle<()>>,
+    /// onify: how long songs blend into each other, in ms (0: off).
+    crossfade_ms: Arc<AtomicU32>,
 }
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy)]
@@ -95,6 +97,37 @@ struct PlayerInternal {
     last_progress_update: Instant,
 
     local_file_lookup: Arc<LocalFileLookup>,
+
+    /// onify: crossfade length in ms, set from the Player handle (0: off).
+    crossfade_ms: Arc<AtomicU32>,
+    /// onify: the song Spirc says plays next (see Player::preload_next).
+    next_track_id: Option<SpotifyUri>,
+    /// onify: the next song while it fades in over the end of this one.
+    fade: Option<Fade>,
+    /// onify: the faded-in song's audio that was decoded but not yet mixed,
+    /// played first once it takes over.
+    carry: Option<(SpotifyUri, Vec<f64>)>,
+    /// onify: the next song was fetched again for a fade (once per song).
+    refetched: Option<SpotifyUri>,
+}
+
+/// onify: the next song, decoding alongside the end of the current one and
+/// mixed over it (equal power: cos/sin), until the current one ends and it
+/// takes over from where it got to.
+struct Fade {
+    track_id: SpotifyUri,
+    loaded: Box<PlayerLoadedTrackData>,
+    normalisation_factor: f64,
+    /// Its samples decoded but not mixed yet (before normalisation).
+    pending: std::collections::VecDeque<f64>,
+    /// Its samples mixed in so far.
+    mixed: u64,
+    /// How many of the current song's samples the fade spans, and how many
+    /// of them have played.
+    length: u64,
+    progress: u64,
+    /// Its decoder ran dry (or failed); the rest of the fade is silence.
+    ended: bool,
 }
 
 static PLAYER_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -106,6 +139,9 @@ enum PlayerCommand {
         position_ms: u32,
     },
     Preload {
+        track_id: SpotifyUri,
+    },
+    PreloadNext {
         track_id: SpotifyUri,
     },
     Play,
@@ -443,6 +479,8 @@ impl Player {
         F: FnOnce() -> Box<dyn Sink> + Send + 'static,
     {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+        let crossfade_ms = Arc::new(AtomicU32::new(0));
+        let internal_crossfade = crossfade_ms.clone();
 
         if config.normalisation {
             debug!("Normalisation Type: {:?}", config.normalisation_type);
@@ -510,6 +548,12 @@ impl Player {
                 last_progress_update: Instant::now(),
 
                 local_file_lookup: Arc::new(local_file_lookup),
+
+                crossfade_ms: internal_crossfade,
+                next_track_id: None,
+                fade: None,
+                carry: None,
+                refetched: None,
             };
 
             // While PlayerInternal is written as a future, it still contains blocking code.
@@ -523,6 +567,7 @@ impl Player {
         Arc::new(Self {
             commands: Some(cmd_tx),
             thread_handle: Some(handle),
+            crossfade_ms,
         })
     }
 
@@ -551,6 +596,18 @@ impl Player {
 
     pub fn preload(&self, track_id: SpotifyUri) {
         self.command(PlayerCommand::Preload { track_id });
+    }
+
+    /// onify: preloads the song that plays next, which a crossfade then
+    /// blends in (a hover preload with `preload` never is).
+    pub fn preload_next(&self, track_id: SpotifyUri) {
+        self.command(PlayerCommand::PreloadNext { track_id });
+    }
+
+    /// onify: how long songs blend into each other, in ms; 0 turns it off.
+    /// Takes effect from the next song change.
+    pub fn set_crossfade(&self, ms: u32) {
+        self.crossfade_ms.store(ms, Ordering::Relaxed);
     }
 
     pub fn play(&self) {
@@ -1426,6 +1483,8 @@ impl Future for PlayerInternal {
 
             if self.state.is_playing() {
                 self.ensure_sink_running();
+                self.play_carry();
+                self.maybe_start_fade();
 
                 if let PlayerState::Playing {
                     ref track_id,
@@ -1532,6 +1591,10 @@ impl Future for PlayerInternal {
                                 }
                             }
 
+                            let mut result = result;
+                            if let Some((_, AudioPacket::Samples(ref mut data))) = result {
+                                self.mix_fade(data, normalisation_factor);
+                            }
                             self.handle_packet(result, normalisation_factor);
                         }
                         Err(e) => {
@@ -1595,6 +1658,139 @@ impl Future for PlayerInternal {
 }
 
 impl PlayerInternal {
+    /// onify: when the playing song nears its end and the next one is
+    /// preloaded, starts fading that one in over it.
+    fn maybe_start_fade(&mut self) {
+        let crossfade = self.crossfade_ms.load(Ordering::Relaxed);
+        if crossfade == 0 || self.fade.is_some() {
+            return;
+        }
+        let PlayerState::Playing {
+            ref track_id,
+            duration_ms,
+            stream_position_ms,
+            ..
+        } = self.state
+        else {
+            return;
+        };
+        let Some(next) = self.next_track_id.clone() else { return };
+        if next == *track_id || duration_ms < crossfade * 2 {
+            return;
+        }
+        let remaining = duration_ms.saturating_sub(stream_position_ms);
+        // A hover preload may have taken the next song's place: fetch it
+        // again in good time.
+        let preloaded = match &self.preload {
+            PlayerPreload::Ready { track_id, .. } | PlayerPreload::Loading { track_id, .. } => {
+                *track_id == next
+            }
+            PlayerPreload::None => false,
+        };
+        if !preloaded && remaining < crossfade + 10_000 && self.refetched.as_ref() != Some(&next) {
+            self.refetched = Some(next.clone());
+            self.handle_command_preload(next);
+            return;
+        }
+        if remaining > crossfade || remaining < 500 {
+            return;
+        }
+        let ready = matches!(&self.preload, PlayerPreload::Ready { track_id, loaded_track }
+            if *track_id == next && loaded_track.duration_ms >= crossfade * 2 && loaded_track.stream_position_ms == 0);
+        if !ready {
+            return;
+        }
+        let PlayerPreload::Ready { track_id, loaded_track } = mem::replace(&mut self.preload, PlayerPreload::None)
+        else {
+            return;
+        };
+        let mut config = self.config.clone();
+        if config.normalisation_type == NormalisationType::Auto {
+            config.normalisation_type = if self.auto_normalise_as_album {
+                NormalisationType::Album
+            } else {
+                NormalisationType::Track
+            };
+        }
+        let normalisation_factor = NormalisationData::get_factor(&config, loaded_track.normalisation_data);
+        debug!("crossfading into <{track_id:?}> over the last {remaining} ms");
+        self.fade = Some(Fade {
+            track_id,
+            loaded: loaded_track,
+            normalisation_factor,
+            pending: Default::default(),
+            mixed: 0,
+            length: remaining as u64 * SAMPLES_PER_SECOND as u64 / 1000,
+            progress: 0,
+            ended: false,
+        });
+    }
+
+    /// onify: mixes the song fading in into `data`, a packet of the song
+    /// fading out, which is then normalised with `current_factor`.
+    fn mix_fade(&mut self, data: &mut [f64], current_factor: f64) {
+        let Some(fade) = self.fade.as_mut() else { return };
+        while fade.pending.len() < data.len() && !fade.ended {
+            match fade.loaded.decoder.next_packet() {
+                Ok(Some((_, AudioPacket::Samples(samples)))) => fade.pending.extend(samples),
+                Ok(Some(_)) => {}
+                Ok(None) | Err(_) => fade.ended = true,
+            }
+        }
+        // The packet is normalised for the outgoing song; scale the incoming
+        // one so it ends up at its own level.
+        let relative = if current_factor > 0.0 { fade.normalisation_factor / current_factor } else { 1.0 };
+        let length = fade.length.max(1) as f64;
+        for sample in data.iter_mut() {
+            let t = (fade.progress as f64 / length).min(1.0) * std::f64::consts::FRAC_PI_2;
+            let incoming = match fade.pending.pop_front() {
+                Some(s) => {
+                    fade.mixed += 1;
+                    s * relative
+                }
+                None => 0.0,
+            };
+            *sample = *sample * t.cos() + incoming * t.sin();
+            fade.progress += 1;
+        }
+    }
+
+    /// onify: a fade that won't finish (a seek, or something else plays
+    /// next): its song goes back to being preloaded, from the top.
+    fn cancel_fade(&mut self, fade: Fade) {
+        let mut loaded = fade.loaded;
+        if loaded.decoder.seek(0).is_ok() {
+            loaded.stream_position_ms = 0;
+            self.preload = PlayerPreload::Ready {
+                track_id: fade.track_id,
+                loaded_track: loaded,
+            };
+        }
+    }
+
+    /// onify: after a fade, the incoming song's audio decoded during it but
+    /// not yet heard plays before its decoder carries on.
+    fn play_carry(&mut self) {
+        let Some((track, samples)) = self.carry.take() else { return };
+        let PlayerState::Playing {
+            ref track_id,
+            normalisation_factor,
+            stream_position_ms,
+            ..
+        } = self.state
+        else {
+            return;
+        };
+        if track != *track_id {
+            return;
+        }
+        let position = AudioPacketPosition {
+            position_ms: stream_position_ms,
+            skipped: false,
+        };
+        self.handle_packet(Some((position, AudioPacket::Samples(samples))), normalisation_factor);
+    }
+
     fn ensure_sink_running(&mut self) {
         if self.sink_status != SinkStatus::Running {
             trace!("== Starting sink ==");
@@ -1645,6 +1841,8 @@ impl PlayerInternal {
     }
 
     fn handle_player_stop(&mut self) {
+        self.fade = None;
+        self.carry = None;
         match self.state {
             PlayerState::Playing {
                 ref track_id,
@@ -2082,6 +2280,23 @@ impl PlayerInternal {
             }
         }
 
+        // onify: the song fading in takes over from where the fade got to.
+        if let Some(fade) = self.fade.take() {
+            if fade.track_id == track_id {
+                let mut loaded_track = fade.loaded;
+                loaded_track.stream_position_ms =
+                    (fade.mixed * 1000 / SAMPLES_PER_SECOND as u64) as u32;
+                let leftover: Vec<f64> = fade.pending.into_iter().collect();
+                if !leftover.is_empty() {
+                    self.carry = Some((track_id.clone(), leftover));
+                }
+                self.start_playback(track_id, play_request_id, *loaded_track, play);
+                return Ok(());
+            }
+            self.cancel_fade(fade);
+        }
+        self.carry = None;
+
         // Check if the requested track has been preloaded already. If so use the preloaded data.
         if let PlayerPreload::Ready {
             track_id: loaded_track_id,
@@ -2206,6 +2421,11 @@ impl PlayerInternal {
     }
 
     fn handle_command_seek(&mut self, position_ms: u32) -> PlayerResult {
+        // onify: seeking away from the end calls the fade off.
+        if let Some(fade) = self.fade.take() {
+            self.cancel_fade(fade);
+        }
+
         // When we are still loading, the user may immediately ask to
         // seek to another position yet the decoder won't be ready for
         // that. In this case just restart the loading process but
@@ -2281,6 +2501,11 @@ impl PlayerInternal {
             } => self.handle_command_load(track_id, None, play, position_ms)?,
 
             PlayerCommand::Preload { track_id } => self.handle_command_preload(track_id),
+
+            PlayerCommand::PreloadNext { track_id } => {
+                self.next_track_id = Some(track_id.clone());
+                self.handle_command_preload(track_id)
+            }
 
             PlayerCommand::Seek(position_ms) => self.handle_command_seek(position_ms)?,
 
@@ -2488,6 +2713,7 @@ impl fmt::Debug for PlayerCommand {
             PlayerCommand::Play => f.debug_tuple("Play").finish(),
             PlayerCommand::Pause => f.debug_tuple("Pause").finish(),
             PlayerCommand::Stop => f.debug_tuple("Stop").finish(),
+            PlayerCommand::PreloadNext { track_id } => f.debug_tuple("PreloadNext").field(&track_id).finish(),
             PlayerCommand::Seek(position) => f.debug_tuple("Seek").field(&position).finish(),
             PlayerCommand::SetSession(_) => f.debug_tuple("SetSession").finish(),
             PlayerCommand::AddEventSender(_) => f.debug_tuple("AddEventSender").finish(),

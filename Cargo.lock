@@ -3085,7 +3085,6 @@ dependencies = [
  "librespot-playback",
  "log",
  "mpris-server",
- "pango 0.22.9",
  "serde_json",
  "souvlaki",
  "symphonia",

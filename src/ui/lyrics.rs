@@ -60,12 +60,15 @@ fn build() -> View {
         .vexpand(true)
         .child(&lines)
         .build();
+    // Ahead of the wheel glide, which takes the scroll for itself.
     let scrolled = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
+    scrolled.set_propagation_phase(gtk::PropagationPhase::Capture);
     scrolled.connect_scroll(|_, _, _| {
         view().user_scrolled_at.set(glib::monotonic_time());
         glib::Propagation::Proceed
     });
     scroller.add_controller(scrolled);
+    super::pages::glide_wheel(&scroller);
 
     let status = adw::StatusPage::builder()
         .icon_name("onify-lyrics-symbolic")

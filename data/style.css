@@ -1,5 +1,5 @@
 /* onify — liquid glass over the playing song's blurred cover.
-   Type: SF Pro. Spacing: 4/8px grid, 36px page gutter. */
+   Type: the system's own UI font. Spacing: 4/8px grid, 36px page gutter. */
 
 :root {
   /* Recoloured from the current cover at runtime. */
@@ -30,28 +30,21 @@
   --thumbnail-bg-color: rgba(255, 255, 255, 0.06);
 }
 
-window {
-  font-family: "SF Pro Text", "Adwaita Sans", sans-serif;
-}
-
 /* ---------- Type scale ---------- */
 
 .title-hero {
-  font-family: "SF Pro Display", "Adwaita Sans", sans-serif;
   font-size: 46px;
   font-weight: 800;
   letter-spacing: -1.2px;
 }
 
 .title-page {
-  font-family: "SF Pro Display", "Adwaita Sans", sans-serif;
   font-size: 30px;
   font-weight: 800;
   letter-spacing: -0.6px;
 }
 
 .title-section {
-  font-family: "SF Pro Display", "Adwaita Sans", sans-serif;
   font-size: 21px;
   font-weight: 700;
   letter-spacing: -0.3px;
@@ -78,7 +71,6 @@ image.brand-logo {
 }
 
 .brand {
-  font-family: "SF Pro Rounded", "SF Pro Display", "Adwaita Sans", sans-serif;
   font-size: 20px;
   font-weight: 800;
   letter-spacing: -0.3px;
@@ -212,6 +204,23 @@ list.navigation-sidebar > row:hover {
 list.navigation-sidebar > row:selected {
   background-color: rgba(255, 255, 255, 0.13);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.09);
+}
+
+/* The sidebar folded into a rail of icons and covers. */
+glass.rail list.navigation-sidebar {
+  padding: 4px 6px 16px 6px;
+}
+
+glass.rail list.navigation-sidebar > row.nav {
+  padding: 0;
+}
+
+glass.rail list.navigation-sidebar > row.library {
+  padding: 0 7px;
+}
+
+glass.rail headerbar {
+  padding: 0;
 }
 
 .sidebar-heading {
@@ -475,6 +484,40 @@ button.row-play:hover {
   background-color: rgba(255, 255, 255, 0.14);
 }
 
+/* A song row's heart and menu: shown while it's hovered or selected; a
+   liked song's heart stays, in the cover's colour. */
+button.row-action {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
+  margin: 0;
+  border-radius: 999px;
+  color: rgba(255, 255, 255, 0.7);
+  opacity: 0;
+  transition: opacity 120ms ease-out, color 120ms ease-out, background-color 120ms ease-out, transform 160ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+.track-row:hover button.row-action,
+listview.tracks > row:selected button.row-action,
+list.tracks > row:selected button.row-action,
+button.row-action:focus-visible,
+button.row-action.liked {
+  opacity: 1;
+}
+
+button.row-action:hover {
+  color: #ffffff;
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+button.row-action:active {
+  transform: scale(0.88);
+}
+
+button.row-action.liked {
+  color: var(--accent-color);
+}
+
 .explicit {
   background-color: rgba(255, 255, 255, 0.5);
   color: #111111;
@@ -497,7 +540,6 @@ image.accent {
 }
 
 label.lyric-line {
-  font-family: "SF Pro Display", "Adwaita Sans", sans-serif;
   font-size: 32px;
   font-weight: 800;
   letter-spacing: -0.5px;
@@ -564,6 +606,31 @@ scrolledwindow.carousel scrollbar {
 
 scrolledwindow.carousel:hover scrollbar {
   opacity: 1;
+}
+
+/* Arrows at a carousel's ends, shown while the pointer is over it. */
+button.shelf-arrow {
+  min-width: 40px;
+  min-height: 40px;
+  padding: 0;
+  color: #ffffff;
+  background-color: rgba(18, 18, 22, 0.86);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  transition: opacity 160ms ease-out, background-color 160ms ease-out, transform 180ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+overlay.shelf:hover button.shelf-arrow {
+  opacity: 1;
+}
+
+button.shelf-arrow:hover {
+  background-color: rgba(40, 40, 48, 0.95);
+  transform: scale(1.06);
+}
+
+button.shelf-arrow:active {
+  transform: scale(0.92);
 }
 
 button.shortcut {
@@ -781,6 +848,67 @@ scale.progress:disabled trough {
   background-color: rgba(255, 255, 255, 0.08);
 }
 
+/* ---------- Devices (Spotify Connect) ---------- */
+
+.playing-on {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent-color);
+  margin-right: 2px;
+}
+
+.player-bar menubutton.devices-button > button {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.player-bar menubutton.devices-button > button:hover {
+  color: #ffffff;
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.player-bar menubutton.devices-button.active > button {
+  color: var(--accent-color);
+  background-color: color-mix(in srgb, var(--accent-color) 22%, transparent);
+}
+
+popover.devices-pop > contents {
+  padding: 14px 8px 8px 8px;
+  min-width: 280px;
+}
+
+.devices-heading {
+  margin: 0 10px 4px 10px;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+list.devices {
+  background: none;
+}
+
+list.devices > row {
+  padding: 8px 10px;
+  border-radius: 10px;
+}
+
+list.devices > row.active image,
+list.devices > row.active .device-name {
+  color: var(--accent-color);
+}
+
+.device-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.device-detail {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
 /* ---------- Floating surfaces ---------- */
 
 /* A pill, but with its real radius: GTK makes a popover at least twice its
@@ -802,7 +930,6 @@ toast {
 }
 
 statuspage > scrolledwindow > viewport > box > clamp > box > .title {
-  font-family: "SF Pro Display", "Adwaita Sans", sans-serif;
   font-weight: 800;
 }
 

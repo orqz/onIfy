@@ -25,26 +25,57 @@ pub fn start() {
     if install == Install::Flatpak || (install == Install::Manual && std::env::var_os("ONIFY_DEV").is_none()) {
         return;
     }
-    glib::timeout_add_local_once(Duration::from_secs(15), || check(false));
+    glib::timeout_add_local_once(Duration::from_secs(15), check);
     glib::timeout_add_local(Duration::from_secs(6 * 60 * 60), || {
-        check(false);
+        check();
         glib::ControlFlow::Continue
     });
 }
 
-/// `manual`: from Preferences, so say when there's nothing new.
-pub fn check(manual: bool) {
-    if (!manual && !ctx().settings.borrow().check_updates) || ASKING.get() {
+/// A quiet check: only a new version shows anything.
+fn check() {
+    if !ctx().settings.borrow().check_updates || ASKING.get() {
         return;
     }
     let install = update::install();
     glib::spawn_future_local(async move {
         let asked = install.clone();
-        match rt::spawn(async move { update::newer(&asked).await }).await {
+        if let Ok(Some(release)) = rt::spawn(async move { update::newer(&asked).await }).await {
+            offer(release, install);
+        }
+    });
+}
+
+/// Check Now in Preferences: the answer shows inside Preferences (the main
+/// window's toasts sit behind it), and the row says it's checking meanwhile.
+pub fn check_in(dialog: &adw::PreferencesDialog, row: &adw::ButtonRow) {
+    if ASKING.get() {
+        return;
+    }
+    row.set_sensitive(false);
+    row.set_title("Checking…");
+    let install = update::install();
+    let (dialog, row) = (dialog.downgrade(), row.downgrade());
+    glib::spawn_future_local(async move {
+        let asked = install.clone();
+        let found = rt::spawn(async move { update::newer(&asked).await }).await;
+        if let Some(row) = row.upgrade() {
+            row.set_sensitive(true);
+            row.set_title("Check Now");
+        }
+        let say = |message: String| match dialog.upgrade() {
+            Some(dialog) => {
+                let toast = adw::Toast::new(&message);
+                toast.set_use_markup(false);
+                toast.set_timeout(3);
+                dialog.add_toast(toast);
+            }
+            None => toast(&message),
+        };
+        match found {
             Ok(Some(release)) => offer(release, install),
-            Ok(None) if manual => toast(&format!("onify {} is the latest version", update::current())),
-            Err(e) if manual => toast(&format!("Couldn't check for updates: {e}")),
-            _ => {}
+            Ok(None) => say(format!("You're up to date: onify {} is the latest version", update::current())),
+            Err(e) => say(format!("Couldn't check for updates: {e}")),
         }
     });
 }

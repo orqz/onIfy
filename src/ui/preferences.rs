@@ -9,14 +9,15 @@ use super::ctx;
 
 pub fn present(window: &adw::ApplicationWindow) {
     let page = adw::PreferencesPage::new();
+    let dialog = adw::PreferencesDialog::builder().title("Preferences").build();
     page.add(&look_group());
     page.add(&playback_group());
     #[cfg(windows)]
     page.add(&window_group());
+    page.add(&discord_group());
     page.add(&performance_group());
     page.add(&local_group());
-    page.add(&updates_group());
-    let dialog = adw::PreferencesDialog::builder().title("Preferences").build();
+    page.add(&updates_group(&dialog));
     dialog.add(&page);
     dialog.present(Some(window));
 }
@@ -58,6 +59,30 @@ fn look_group() -> adw::PreferencesGroup {
         super::apply_style(name);
     });
     group.add(&style);
+
+    use crate::settings::{ZOOM_MAX, ZOOM_MIN};
+    let zoom = adw::SpinRow::builder()
+        .title("Zoom")
+        .subtitle("How big everything is, in percent. Ctrl + and Ctrl − change it too, Ctrl 0 resets it")
+        .adjustment(&gtk::Adjustment::new(
+            (ctx().settings.borrow().zoom * 100.0).round(),
+            ZOOM_MIN * 100.0,
+            ZOOM_MAX * 100.0,
+            10.0,
+            10.0,
+            0.0,
+        ))
+        .build();
+    zoom.connect_value_notify(|row| {
+        let zoom = row.value().round() / 100.0;
+        if (zoom - ctx().settings.borrow().zoom).abs() < 0.001 {
+            return;
+        }
+        ctx().settings.borrow_mut().zoom = zoom;
+        save();
+        super::set_zoom(zoom);
+    });
+    group.add(&zoom);
     group
 }
 
@@ -88,6 +113,85 @@ fn playback_group() -> adw::PreferencesGroup {
         super::player_settings_changed();
     });
     group.add(&quality);
+
+    let crossfade = adw::SpinRow::builder()
+        .title("Crossfade")
+        .subtitle("Seconds each song blends into the next; 0 is off")
+        .adjustment(&gtk::Adjustment::new(ctx().settings.borrow().crossfade as f64, 0.0, 12.0, 1.0, 1.0, 0.0))
+        .build();
+    crossfade.connect_value_notify(|row| {
+        let seconds = row.value().round() as u32;
+        ctx().settings.borrow_mut().crossfade = seconds;
+        save();
+        ctx().with_engine(|e| e.set_crossfade(seconds));
+    });
+    group.add(&crossfade);
+    group
+}
+
+fn discord_group() -> adw::PreferencesGroup {
+    use crate::discord::{ONIFY_APP, StatusShows};
+    let group = adw::PreferencesGroup::builder()
+        .title("Discord")
+        .description("Shows what you're playing on your Discord profile, local files included. Spotify's own Discord connection works too; turn one off if both show.")
+        .build();
+    let shared = ctx();
+    let (enabled, app_id, status) = {
+        let settings = shared.settings.borrow();
+        (settings.discord, settings.discord_app_id.clone(), StatusShows::from_name(&settings.discord_status))
+    };
+    let show = switch("Show on Discord", "Listening to… with the cover, artist and time left", enabled, |on| {
+        ctx().settings.borrow_mut().discord = on;
+        super::integrations::discord_settings_changed();
+    });
+    group.add(&show);
+
+    let labels: Vec<&str> = StatusShows::ALL.iter().map(|s| s.label()).collect();
+    let shows = adw::ComboRow::builder()
+        .title("Status Shows")
+        .subtitle("What \"Listening to\" names under your profile")
+        .model(&gtk::StringList::new(&labels))
+        .selected(StatusShows::ALL.iter().position(|s| *s == status).unwrap_or(0) as u32)
+        .build();
+    shows.connect_selected_notify(|row| {
+        let shows = StatusShows::ALL.get(row.selected() as usize).copied().unwrap_or_default();
+        ctx().settings.borrow_mut().discord_status = shows.name().to_owned();
+        save();
+        super::integrations::discord_settings_changed();
+    });
+    group.add(&shows);
+
+    let id = adw::EntryRow::builder()
+        .title(if ONIFY_APP.is_empty() { "Application ID" } else { "Application ID (empty for onify's)" })
+        .text(app_id.as_str())
+        .show_apply_button(true)
+        .input_purpose(gtk::InputPurpose::Digits)
+        .build();
+    id.connect_apply(|row| {
+        ctx().settings.borrow_mut().discord_app_id = row.text().trim().to_owned();
+        save();
+        super::integrations::discord_settings_changed();
+    });
+    group.add(&id);
+    for row in [shows.upcast_ref::<gtk::Widget>(), id.upcast_ref()] {
+        show.bind_property("active", row, "sensitive").sync_create().build();
+    }
+    if ONIFY_APP.is_empty() {
+        let help = adw::ActionRow::builder()
+            .title("Get an Application ID")
+            .subtitle("Create an application named onify at discord.com/developers and paste its ID above")
+            .activatable(true)
+            .build();
+        help.add_suffix(&gtk::Image::from_icon_name("onify-go-next-symbolic"));
+        help.connect_activated(|_| {
+            gtk::UriLauncher::new("https://discord.com/developers/applications").launch(
+                None::<&gtk::Window>,
+                gtk::gio::Cancellable::NONE,
+                |_| {},
+            );
+        });
+        group.add(&help);
+    }
     group
 }
 
@@ -211,7 +315,7 @@ fn change_folders(change: impl FnOnce(&mut Vec<PathBuf>)) {
 }
 
 
-fn updates_group() -> adw::PreferencesGroup {
+fn updates_group(dialog: &adw::PreferencesDialog) -> adw::PreferencesGroup {
     let group = adw::PreferencesGroup::builder()
         .title("Updates")
         .description(format!("This is onify {}.", crate::update::current()))
@@ -222,7 +326,11 @@ fn updates_group() -> adw::PreferencesGroup {
         save();
     }));
     let now = adw::ButtonRow::builder().title("Check Now").build();
-    now.connect_activated(|_| super::updater::check(true));
+    now.connect_activated(glib::clone!(
+        #[weak]
+        dialog,
+        move |row| super::updater::check_in(&dialog, row)
+    ));
     group.add(&now);
     group
 }

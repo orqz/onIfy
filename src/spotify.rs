@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use librespot_connect::{
-    ConnectConfig, LoadContextOptions, LoadRequest, LoadRequestOptions, Options, PlayingTrack,
+    ClusterInfo, ConnectConfig, LoadContextOptions, LoadRequest, LoadRequestOptions, Options, PlayingTrack,
     Spirc,
 };
 use librespot_core::authentication::Credentials;
@@ -202,6 +202,10 @@ pub enum Event {
     /// The account behind the engine with this generation isn't Premium,
     /// which Spotify needs to stream to other apps.
     NotPremium(u64),
+    /// The account's devices, and what plays on the active one.
+    Devices(Arc<ClusterInfo>),
+    /// What another device is playing, looked up for showing it here.
+    RemoteTrack(NowPlaying),
 }
 
 /// Streaming quality. Spotify offers librespot Ogg Vorbis up to 320 kbps; its
@@ -246,8 +250,23 @@ impl Quality {
     }
 }
 
+/// What a song was played from, so it can be played the same way again
+/// (see crate::resume): a playlist, album, artist or collection, or a loose
+/// list of songs.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Context {
+    Uri(String),
+    Tracks(Vec<String>),
+}
+
+/// Loose lists longer than this aren't remembered (Local Files can hold
+/// thousands); the song alone is.
+const REMEMBERED_LIST: usize = 500;
+
 pub struct Engine {
     pub session: Session,
+    /// What the last play request played from.
+    context: std::sync::Mutex<Option<Context>>,
     spirc: Spirc,
     /// Kept to preload songs ahead of a click.
     player: Arc<Player>,
@@ -303,6 +322,7 @@ impl Engine {
         let loading = Arc::new(AtomicBool::new(false));
         let engine = Arc::new(Self {
             session,
+            context: std::sync::Mutex::new(None),
             spirc,
             player,
             flush_on_load: flush_on_load.clone(),
@@ -316,6 +336,19 @@ impl Engine {
         tokio::spawn(async move {
             spirc_task.await;
             let _ = done.send(Event::Disconnected(generation));
+        });
+        // Other devices and what they play, for the device picker.
+        let mut clusters = engine.spirc.clusters();
+        let devices = events.clone();
+        tokio::spawn(async move {
+            while clusters.changed().await.is_ok() {
+                let info = clusters.borrow_and_update().clone();
+                if let Some(info) = info {
+                    if devices.send(Event::Devices(info)).is_err() {
+                        break;
+                    }
+                }
+            }
         });
         // Spotify says which plan the account is on shortly after connecting.
         let session = engine.session.clone();
@@ -360,6 +393,7 @@ impl Engine {
 
     /// Plays a playlist, album, artist or collection, optionally from a track.
     pub fn play_context(&self, context: &str, track: Option<&str>, shuffle: Option<bool>) {
+        *self.context.lock().unwrap() = Some(Context::Uri(context.to_owned()));
         let track = track.map(|t| PlayingTrack::Uri(t.to_owned()));
         self.load(LoadRequest::from_context_uri(
             context.to_owned(),
@@ -374,8 +408,31 @@ impl Engine {
 
     /// Plays a loose list of tracks (local files) from `index`, or from the top.
     pub fn play_list(&self, uris: Vec<String>, index: Option<usize>, shuffle: Option<bool>) {
+        let remembered = (uris.len() <= REMEMBERED_LIST).then(|| Context::Tracks(uris.clone()));
+        *self.context.lock().unwrap() = remembered;
         let track = index.map(|i| PlayingTrack::Index(i as u32));
         self.load(LoadRequest::from_tracks(uris, self.options(track, shuffle)));
+    }
+
+    /// What the last play request played from, if onify knows.
+    pub fn context(&self) -> Option<Context> {
+        self.context.lock().unwrap().clone()
+    }
+
+    /// Plays `track` from `position_ms` in its context, the way it was
+    /// playing last time (or on its own, when its list wasn't kept).
+    pub fn resume(&self, track: &str, context: Option<&Context>, position_ms: u32) {
+        let mut options = self.options(Some(PlayingTrack::Uri(track.to_owned())), None);
+        options.seek_to = position_ms;
+        *self.context.lock().unwrap() = context.cloned();
+        let request = match context {
+            Some(Context::Uri(uri)) => LoadRequest::from_context_uri(uri.clone(), options),
+            Some(Context::Tracks(uris)) if uris.iter().any(|u| u == track) => {
+                LoadRequest::from_tracks(uris.clone(), options)
+            }
+            _ => LoadRequest::from_tracks(vec![track.to_owned()], options),
+        };
+        self.load(request);
     }
 
     pub fn play(&self) {
@@ -433,6 +490,11 @@ impl Engine {
         let _ = self.spirc.repeat_track(track);
     }
 
+    /// Songs blend into each other over this many seconds (0: off).
+    pub fn set_crossfade(&self, seconds: u32) {
+        self.player.set_crossfade(seconds * 1000);
+    }
+
     pub fn note_shuffle(&self, shuffle: bool) {
         self.shuffle.store(shuffle, Ordering::Relaxed);
     }
@@ -443,6 +505,25 @@ impl Engine {
 
     pub fn shutdown(&self) {
         let _ = self.spirc.shutdown();
+    }
+
+    /// This device's Spotify Connect id.
+    pub fn device_id(&self) -> String {
+        self.session.device_id().to_owned()
+    }
+
+    /// Looks up a song another device is playing (Event::RemoteTrack).
+    pub fn look_up(&self, uri: &str, events: UnboundedSender<Event>) {
+        let Ok(id) = librespot_core::SpotifyUri::from_uri(uri) else { return };
+        let session = self.session.clone();
+        tokio::spawn(async move {
+            match AudioItem::get_file(&session, id).await {
+                Ok(item) => {
+                    let _ = events.send(Event::RemoteTrack(NowPlaying::from_item(item)));
+                }
+                Err(e) => log::warn!("couldn't look up the other device's song: {e}"),
+            }
+        });
     }
 }
 

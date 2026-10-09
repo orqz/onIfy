@@ -41,7 +41,10 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use thiserror::Error;
-use tokio::{sync::mpsc, time::sleep};
+use tokio::{
+    sync::{mpsc, watch},
+    time::sleep,
+};
 
 #[derive(Debug, Error)]
 enum SpircError {
@@ -108,6 +111,12 @@ struct SpircTask {
     /// when no other future resolves, otherwise resets the delay
     update_state: bool,
 
+    /// onify: when Previous last started the song over (see handle_prev)
+    prev_restarted_at: Option<std::time::Instant>,
+
+    /// onify: the account's devices and their playback, for Spirc::clusters
+    clusters: watch::Sender<Option<Arc<crate::ClusterInfo>>>,
+
     spirc_id: usize,
 }
 
@@ -144,6 +153,7 @@ const UPDATE_STATE_DELAY: Duration = Duration::from_millis(200);
 /// The spotify connect handle
 pub struct Spirc {
     commands: mpsc::UnboundedSender<SpircCommand>,
+    clusters: watch::Receiver<Option<Arc<crate::ClusterInfo>>>,
 }
 
 impl Spirc {
@@ -222,6 +232,7 @@ impl Spirc {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
 
         let player_events = player.get_player_event_channel();
+        let (clusters_tx, clusters_rx) = watch::channel(None);
 
         let mut task = SpircTask {
             player,
@@ -253,11 +264,16 @@ impl Spirc {
             transfer_state: None,
             update_volume: false,
             update_state: false,
+            prev_restarted_at: None,
+            clusters: clusters_tx,
 
             spirc_id,
         };
 
-        let spirc = Spirc { commands: cmd_tx };
+        let spirc = Spirc {
+            commands: cmd_tx,
+            clusters: clusters_rx,
+        };
 
         let initial_volume = task.connect_state.device_info().volume;
         task.connect_state.set_volume(0);
@@ -281,6 +297,12 @@ impl Spirc {
     /// bring the future initially returned to an end.
     pub fn shutdown(&self) -> Result<(), Error> {
         Ok(self.commands.send(SpircCommand::Shutdown)?)
+    }
+
+    /// onify: the account's devices and what plays on the active one, updated
+    /// as Spotify Connect reports changes.
+    pub fn clusters(&self) -> watch::Receiver<Option<Arc<crate::ClusterInfo>>> {
+        self.clusters.clone()
     }
 
     /// Resumes the playback
@@ -838,6 +860,7 @@ impl SpircTask {
             "successfully put connect state for {} with connection-id {connection_id}",
             self.session.device_id()
         );
+        let _ = self.clusters.send(Some(Arc::new((&cluster).into())));
 
         self.connect_established = true;
 
@@ -928,6 +951,7 @@ impl SpircTask {
         );
 
         if let Some(cluster) = cluster_update.cluster.take() {
+            let _ = self.clusters.send(Some(Arc::new((&cluster).into())));
             let became_inactive = self.connect_state.is_active()
                 && cluster.active_device_id != self.session.device_id();
             if became_inactive {
@@ -1562,7 +1586,8 @@ impl SpircTask {
         }
 
         if let Some(track_id) = self.connect_state.preview_next_track() {
-            self.player.preload(track_id);
+            // onify: preload_next, so a crossfade knows it's the next song.
+            self.player.preload_next(track_id);
         }
     }
 
@@ -1642,19 +1667,25 @@ impl SpircTask {
         // Previous behaves differently based on the position
         // Under 3s it goes to the previous song (starts playing)
         // Over 3s it seeks to zero (retains previous play status)
-        if self.position() < 3000 {
-            match self.connect_state.prev_track()? {
-                // onify: nothing played before this song (the first one after
-                // starting a playlist, always the case when shuffled): start
-                // it over like Spotify's apps do, instead of stopping.
-                None => {
-                    self.connect_state.reset_playback_to_position(None)?;
-                    self.load_track(self.connect_state.is_playing(), 0)?
-                }
-                Some(_) => self.load_track(self.connect_state.is_playing(), 0)?,
+        //
+        // onify: pressed again within a few seconds of starting the song over,
+        // it always goes back a song (the restart may still be buffering, or
+        // the song may already be past 3 s again).
+        let again = self
+            .prev_restarted_at
+            .take()
+            .is_some_and(|at| at.elapsed() < Duration::from_secs(5));
+        if self.position() < 3000 || again {
+            if self.connect_state.has_prev_track() {
+                self.connect_state.prev_track()?;
             }
+            // onify: with nothing played before this song (the first one
+            // after starting a playlist shuffled), it starts over, like
+            // Spotify's apps, instead of stopping or jumping to the top.
+            self.load_track(self.connect_state.is_playing(), 0)?;
         } else {
             self.handle_seek(0);
+            self.prev_restarted_at = Some(std::time::Instant::now());
         }
 
         Ok(())

@@ -20,12 +20,27 @@ pub struct Settings {
     /// Windows: closing the window keeps onify in the tray.
     #[cfg_attr(not(windows), allow(dead_code))]
     pub close_to_tray: bool,
+    /// How big everything is drawn, 1.0 for normal (Ctrl + / Ctrl -).
+    pub zoom: f64,
+    /// The sidebar shows only icons.
+    pub sidebar_collapsed: bool,
+    /// Seconds songs blend into each other; 0 for off.
+    pub crossfade: u32,
+    /// Discord: show what's playing on your profile through onify itself.
+    pub discord: bool,
+    /// The Discord application presence shows as; empty for onify's own.
+    pub discord_app_id: String,
+    /// What Discord's status line shows: "song", "artist" or "app".
+    pub discord_status: String,
     /// Performance switches.
     pub animations: bool,
     pub cover_background: bool,
     pub hover_preload: bool,
     pub low_memory: bool,
 }
+
+pub const ZOOM_MIN: f64 = 0.3;
+pub const ZOOM_MAX: f64 = 2.0;
 
 fn path() -> PathBuf {
     crate::spotify::config_dir().join("settings.json")
@@ -53,6 +68,12 @@ impl Settings {
             check_updates: v["check_updates"].as_bool().unwrap_or(true),
             quality: v["quality"].as_str().unwrap_or("very_high").to_owned(),
             close_to_tray: v["close_to_tray"].as_bool().unwrap_or(true),
+            zoom: v["zoom"].as_f64().unwrap_or(1.0).clamp(ZOOM_MIN, ZOOM_MAX),
+            sidebar_collapsed: v["sidebar_collapsed"].as_bool().unwrap_or(false),
+            crossfade: v["crossfade"].as_u64().unwrap_or(0).min(12) as u32,
+            discord: v["discord"].as_bool().unwrap_or(false),
+            discord_app_id: text("discord_app_id"),
+            discord_status: text("discord_status"),
             animations: v["animations"].as_bool().unwrap_or(true),
             cover_background: v["cover_background"].as_bool().unwrap_or(true),
             hover_preload: v["hover_preload"].as_bool().unwrap_or(true),
@@ -74,6 +95,12 @@ impl Settings {
             "check_updates": self.check_updates,
             "quality": self.quality,
             "close_to_tray": self.close_to_tray,
+            "zoom": self.zoom,
+            "sidebar_collapsed": self.sidebar_collapsed,
+            "crossfade": self.crossfade,
+            "discord": self.discord,
+            "discord_app_id": self.discord_app_id,
+            "discord_status": self.discord_status,
             "animations": self.animations,
             "cover_background": self.cover_background,
             "hover_preload": self.hover_preload,
@@ -81,6 +108,16 @@ impl Settings {
         });
         let _ = std::fs::create_dir_all(crate::spotify::config_dir());
         let _ = std::fs::write(path(), v.to_string());
+    }
+
+    /// The Discord application to show presence as, or empty for none.
+    pub fn discord_id(&self) -> String {
+        let custom = self.discord_app_id.trim();
+        match (self.discord, custom.is_empty()) {
+            (false, _) => String::new(),
+            (true, false) => custom.to_owned(),
+            (true, true) => crate::discord::ONIFY_APP.to_owned(),
+        }
     }
 
     /// Animations, cover background, hover preload, low memory.

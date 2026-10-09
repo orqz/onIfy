@@ -2,6 +2,7 @@
 
 mod backdrop;
 mod cover;
+mod devices;
 #[cfg(windows)]
 mod frame;
 mod glass;
@@ -14,6 +15,7 @@ mod track_row;
 #[cfg(windows)]
 mod tray;
 mod updater;
+mod zoom;
 
 #[cfg(windows)]
 pub use frame::hand_over_to_running;
@@ -79,6 +81,7 @@ struct Login {
 pub struct Ctx {
     app: adw::Application,
     window: adw::ApplicationWindow,
+    zoom: zoom::Zoom,
     toasts: adw::ToastOverlay,
     backdrop: Backdrop,
     host: GlassHost,
@@ -87,6 +90,7 @@ pub struct Ctx {
     split: adw::NavigationSplitView,
     nav: adw::NavigationView,
     sidebar: gtk::ListBox,
+    side: Sidebar,
     sidebar_routes: RefCell<Vec<Option<Route>>>,
     pub bar: Rc<PlayerBar>,
     home: HomePage,
@@ -109,6 +113,12 @@ pub struct Ctx {
     #[cfg(target_os = "linux")]
     mpris: RefCell<Option<Rc<mpris_server::Player>>>,
     now: RefCell<Option<NowPlaying>>,
+    /// The song to pick up from, saved as it plays (see crate::resume).
+    last_played: RefCell<Option<crate::resume::LastPlayed>>,
+    /// Play was pressed on it before Spotify had connected.
+    resume_pending: Cell<bool>,
+    /// Saves the position every few seconds while music plays.
+    remember_tick: RefCell<Option<glib::SourceId>>,
     /// A link to open once the library has loaded.
     pending_link: RefCell<Option<String>>,
     /// What the sidebar and Home show, to skip redrawing identical data.
@@ -184,37 +194,16 @@ pub fn startup(_: &adw::Application) {
     }
 }
 
-/// Windows hands GTK its 9pt menu font, while onify is laid out for 11pt
-/// (what Linux uses), and Segoe UI rendered badly through GTK; onify brings
-/// Adwaita Sans, the font libadwaita is drawn for (data/fonts).
+/// Windows' own UI font, Segoe UI. Windows hands GTK its 9pt menu size, while
+/// onify is laid out for 11pt (what Linux uses).
 #[cfg(windows)]
 fn windows_fonts(settings: &gtk::Settings) {
-    use gtk::pango::prelude::*;
-    let font_map = gtk::Label::new(None).pango_context().font_map();
-    let loaded = bundled_font().zip(font_map).is_some_and(|(file, map)| match map.add_font_file(&file) {
-        Ok(()) => true,
-        Err(e) => {
-            log::warn!("couldn't load {}: {e}", file.display());
-            false
-        }
-    });
-    settings.set_gtk_font_name(Some(if loaded { "Adwaita Sans 11" } else { "Segoe UI 11" }));
+    settings.set_gtk_font_name(Some("Segoe UI 11"));
     settings.set_gtk_font_rendering(gtk::FontRendering::Manual);
     settings.set_gtk_hint_font_metrics(true);
     settings.set_gtk_xft_antialias(1);
     settings.set_gtk_xft_hinting(1);
-    settings.set_gtk_xft_hintstyle(Some("hintslight"));
-}
-
-/// The installer puts the font in share\onify\fonts next to bin\; a copy
-/// run from the source tree uses the repo's.
-#[cfg(windows)]
-fn bundled_font() -> Option<std::path::PathBuf> {
-    const FILE: &str = "AdwaitaSans-Regular.ttf";
-    let exe = std::env::current_exe().ok()?;
-    let installed = exe.parent()?.parent()?.join("share").join("onify").join("fonts").join(FILE);
-    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("data").join("fonts").join(FILE);
-    [installed, source].into_iter().find(|path| path.is_file())
+    settings.set_gtk_xft_hintstyle(Some("hintfull"));
 }
 
 fn strip_window_icon(settings: &gtk::Settings) {
@@ -244,8 +233,6 @@ pub fn activate(app: &adw::Application) {
         .title("onify")
         .default_width(1280)
         .default_height(820)
-        .width_request(300)
-        .height_request(480)
         .build();
     // Windows draws the frame, shadow and rounded corners instead of GTK
     // (frame.rs), so GTK's invisible resize border around the window goes.
@@ -265,7 +252,8 @@ pub fn activate(app: &adw::Application) {
     nav.replace_with_tags(&["home"]);
     nav.set_margin_bottom(PLAYER_SPACE);
     let content = adw::NavigationPage::builder().title("onify").child(&nav).build();
-    let (sidebar_page, sidebar, sidebar_glass) = build_sidebar();
+    let (sidebar_page, sidebar, side) = build_sidebar();
+    let sidebar_glass = side.glass.clone();
     let split = adw::NavigationSplitView::builder()
         .sidebar(&sidebar_page)
         .content(&content)
@@ -302,7 +290,12 @@ pub fn activate(app: &adw::Application) {
     let toasts = adw::ToastOverlay::new();
     toasts.set_child(Some(&host));
     let style = settings.style.clone();
-    window.set_content(Some(&toasts));
+    // Size tiers follow the room the pages get, which zooming changes, so
+    // they're judged inside the zoom rather than on the window.
+    let sized = adw::BreakpointBin::builder().width_request(300).height_request(480).child(&toasts).build();
+    let zoom = zoom::Zoom::new(&sized);
+    zoom.set_scale(settings.zoom);
+    window.set_content(Some(&zoom));
 
     // Window size tiers: pages scale their headers, gutters and rows (see
     // pages::Tier). Only the last matching breakpoint applies, so each one
@@ -310,7 +303,7 @@ pub fn activate(app: &adw::Application) {
     let medium = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 1100sp or max-height: 720sp").unwrap());
     medium.connect_apply(|bp| set_tier(bp, pages::Tier::Medium));
     medium.connect_unapply(|bp| set_tier(bp, pages::Tier::Large));
-    window.add_breakpoint(medium);
+    sized.add_breakpoint(medium);
     let narrow = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 760sp").unwrap());
     narrow.connect_apply(|bp| set_tier(bp, pages::Tier::Medium));
     narrow.connect_unapply(|bp| set_tier(bp, pages::Tier::Large));
@@ -321,7 +314,7 @@ pub fn activate(app: &adw::Application) {
         narrow.add_setter(widget, "visible", Some(&false.to_value()));
     }
     narrow.add_setter(&bar.widget, "homogeneous", Some(&false.to_value()));
-    window.add_breakpoint(narrow);
+    sized.add_breakpoint(narrow);
     // Phone-width windows: stack page headers, keep only the core controls.
     let compact = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 560sp").unwrap());
     compact.add_setter(&split, "collapsed", Some(&true.to_value()));
@@ -335,11 +328,12 @@ pub fn activate(app: &adw::Application) {
     }
     compact.connect_apply(|bp| set_tier(bp, pages::Tier::Compact));
     compact.connect_unapply(|bp| set_tier(bp, pages::Tier::Large));
-    window.add_breakpoint(compact);
+    sized.add_breakpoint(compact);
 
     let ctx = Rc::new(Ctx {
         app: app.clone(),
         window: window.clone(),
+        zoom,
         toasts,
         backdrop,
         host,
@@ -348,6 +342,7 @@ pub fn activate(app: &adw::Application) {
         split,
         nav,
         sidebar,
+        side,
         sidebar_routes: RefCell::new(vec![
             Some(Route::Home),
             Some(Route::Search),
@@ -372,6 +367,9 @@ pub fn activate(app: &adw::Application) {
         #[cfg(target_os = "linux")]
         mpris: RefCell::default(),
         now: RefCell::default(),
+        last_played: RefCell::default(),
+        resume_pending: Cell::new(false),
+        remember_tick: RefCell::default(),
         pending_link: RefCell::default(),
         shown_library: RefCell::default(),
         shown_home: RefCell::default(),
@@ -381,6 +379,9 @@ pub fn activate(app: &adw::Application) {
     });
     tier_classes(&ctx.window, pages::tier());
     apply_style(&style);
+    apply_rail();
+    // A narrow window shows the sidebar full width, never as a rail.
+    ctx.split.connect_collapsed_notify(|_| apply_rail());
 
     ctx.bar.set_volume(ctx.settings.borrow().volume);
     // The lyrics button lights up while lyrics are showing.
@@ -416,6 +417,7 @@ pub fn activate(app: &adw::Application) {
         Some(credentials) => {
             ctx.root.set_visible_child_name("main");
             show_cached_library();
+            show_last_played();
             connect(credentials);
         }
         None => ctx.root.set_visible_child_name("login"),
@@ -509,7 +511,7 @@ fn nav_row(icon: &str, name: &str) -> gtk::ListBoxRow {
     content.append(&gtk::Image::from_icon_name(icon));
     let label = gtk::Label::builder().label(name).xalign(0.0).build();
     content.append(&label);
-    let row = gtk::ListBoxRow::builder().child(&content).build();
+    let row = gtk::ListBoxRow::builder().child(&content).tooltip_text(name).build();
     row.add_css_class("nav");
     row
 }
@@ -546,7 +548,19 @@ fn library_row(card: &Card) -> gtk::ListBoxRow {
     row
 }
 
-fn build_sidebar() -> (adw::NavigationPage, gtk::ListBox, Glass) {
+/// The sidebar's parts that change when it folds into a rail of icons.
+struct Sidebar {
+    glass: Glass,
+    header: adw::HeaderBar,
+    brand: gtk::Box,
+    names: gtk::Box,
+    menu: gtk::MenuButton,
+    toggle: gtk::Button,
+    /// The settings menu again, at the bottom of the rail.
+    rail_menu: gtk::MenuButton,
+}
+
+fn build_sidebar() -> (adw::NavigationPage, gtk::ListBox, Sidebar) {
     let list = gtk::ListBox::new();
     list.add_css_class("navigation-sidebar");
     list.append(&nav_row("onify-go-home-symbolic", "Home"));
@@ -575,6 +589,20 @@ fn build_sidebar() -> (adw::NavigationPage, gtk::ListBox, Glass) {
         .menu_model(&menu)
         .tooltip_text("Settings")
         .build();
+    let rail_menu = gtk::MenuButton::builder()
+        .icon_name("onify-settings-symbolic")
+        .menu_model(&menu)
+        .tooltip_text("Settings")
+        .halign(gtk::Align::Center)
+        .margin_bottom(12)
+        .visible(false)
+        .build();
+    rail_menu.add_css_class("rail-menu");
+    let toggle = gtk::Button::builder()
+        .icon_name("onify-sidebar-symbolic")
+        .tooltip_text("Collapse Sidebar (Ctrl+B)")
+        .action_name("app.toggle-sidebar")
+        .build();
     // Logo centred over the menu icons below it, the name level with their
     // labels.
     let brand = gtk::Box::builder().spacing(8).margin_start(12).build();
@@ -595,8 +623,10 @@ fn build_sidebar() -> (adw::NavigationPage, gtk::ListBox, Glass) {
     header.set_show_title(false);
     header.pack_start(&brand);
     header.pack_end(&menu_button);
+    header.pack_end(&toggle);
     let toolbar = adw::ToolbarView::new();
     toolbar.add_top_bar(&header);
+    toolbar.add_bottom_bar(&rail_menu);
     let scroller = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Never)
         .child(&list)
@@ -611,7 +641,70 @@ fn build_sidebar() -> (adw::NavigationPage, gtk::ListBox, Glass) {
     glass.append(&toolbar);
     // No `.sidebar` class: libadwaita draws a divider line for it.
     let page = adw::NavigationPage::builder().title("onify").child(&glass).build();
-    (page, list, glass)
+    let parts = Sidebar { glass, header, brand, names, menu: menu_button, toggle, rail_menu };
+    (page, list, parts)
+}
+
+/// Width of the folded sidebar: a column of 42px covers and icons.
+const RAIL_WIDTH: f64 = 92.0;
+
+/// Folds the sidebar into a rail of icons and covers, like Spotify's
+/// collapsed library, or opens it out again (Settings: sidebar_collapsed).
+/// A narrow window shows the sidebar on its own, full width, so it's never a
+/// rail then.
+fn apply_rail() {
+    let ctx = ctx();
+    let rail = ctx.settings.borrow().sidebar_collapsed && !ctx.split.is_collapsed();
+    let side = &ctx.side;
+    if rail {
+        ctx.split.set_min_sidebar_width(RAIL_WIDTH);
+        ctx.split.set_max_sidebar_width(RAIL_WIDTH);
+        side.glass.add_css_class("rail");
+    } else {
+        ctx.split.set_min_sidebar_width(220.0);
+        ctx.split.set_max_sidebar_width(300.0);
+        side.glass.remove_css_class("rail");
+    }
+    side.names.set_visible(!rail);
+    side.brand.set_visible(!rail);
+    side.menu.set_visible(!rail);
+    side.rail_menu.set_visible(rail);
+    side.header.set_show_start_title_buttons(!rail);
+    // The rail's header holds just the toggle, centred over the icons.
+    let centred = side.header.title_widget().as_ref() == Some(side.toggle.upcast_ref());
+    if rail && !centred {
+        side.header.remove(&side.toggle);
+        side.header.set_title_widget(Some(&side.toggle));
+        side.header.set_show_title(true);
+    } else if !rail && centred {
+        side.header.set_title_widget(None::<&gtk::Widget>);
+        side.header.set_show_title(false);
+        side.header.pack_end(&side.toggle);
+    }
+    side.toggle.set_tooltip_text(Some(if rail { "Expand Sidebar (Ctrl+B)" } else { "Collapse Sidebar (Ctrl+B)" }));
+    let mut row = ctx.sidebar.first_child();
+    while let Some(widget) = row {
+        if let Some(row) = widget.downcast_ref::<gtk::ListBoxRow>() {
+            rail_row(row, rail);
+        }
+        row = widget.next_sibling();
+    }
+}
+
+/// One sidebar row as a rail item: just its icon or cover, centred (the
+/// "Your Library" heading goes).
+fn rail_row(row: &gtk::ListBoxRow, rail: bool) {
+    let Some(content) = row.child() else { return };
+    if content.is::<gtk::Label>() {
+        row.set_visible(!rail);
+        return;
+    }
+    content.set_halign(if rail { gtk::Align::Center } else { gtk::Align::Fill });
+    let mut child = content.first_child().and_then(|c| c.next_sibling());
+    while let Some(widget) = child {
+        widget.set_visible(!rail);
+        child = widget.next_sibling();
+    }
 }
 
 fn fill_sidebar(playlists: &[Card]) {
@@ -635,8 +728,12 @@ fn fill_sidebar(playlists: &[Card]) {
         .build();
     ctx.sidebar.append(&heading_row);
     routes.push(None);
+    let rail = ctx.settings.borrow().sidebar_collapsed && !ctx.split.is_collapsed();
+    rail_row(&heading_row, rail);
     for playlist in playlists {
-        ctx.sidebar.append(&library_row(playlist));
+        let row = library_row(playlist);
+        rail_row(&row, rail);
+        ctx.sidebar.append(&row);
         routes.push(Some(Route::Card(playlist.clone())));
     }
 }
@@ -674,6 +771,45 @@ pub fn apply_style(name: &str) {
     ctx.host.set_shade_only(vinyl);
     ctx.bar.set_record(vinyl);
     pages::set_vinyl(vinyl);
+}
+
+thread_local! {
+    /// The "Zoom 120%" toast, reused while it shows.
+    static ZOOM_TOAST: RefCell<Option<glib::WeakRef<adw::Toast>>> = const { RefCell::new(None) };
+}
+
+/// Zoom steps, like a browser's.
+const ZOOM_LEVELS: &[f64] = &[0.3, 0.4, 0.5, 0.6, 0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0];
+
+/// Scales the whole window's contents (see zoom.rs); 1.0 is normal size.
+pub fn set_zoom(zoom: f64) {
+    ctx().zoom.set_scale(zoom);
+}
+
+/// Ctrl + (1), Ctrl - (-1) and Ctrl 0 (0), a step at a time.
+fn step_zoom(step: i32) {
+    let ctx = ctx();
+    let current = ctx.settings.borrow().zoom;
+    let zoom = match step {
+        0 => 1.0,
+        1 => ZOOM_LEVELS.iter().copied().find(|&z| z > current + 0.001).unwrap_or(current),
+        _ => ZOOM_LEVELS.iter().rev().copied().find(|&z| z < current - 0.001).unwrap_or(current),
+    };
+    ctx.settings.borrow_mut().zoom = zoom;
+    ctx.settings.borrow().save();
+    set_zoom(zoom);
+    let message = format!("Zoom {}%", (zoom * 100.0).round());
+    let shown = ZOOM_TOAST.with_borrow(|t| t.as_ref().and_then(|t| t.upgrade()));
+    match shown {
+        Some(toast) => toast.set_title(&message),
+        None => {
+            let toast = adw::Toast::new(&message);
+            toast.set_timeout(2);
+            toast.connect_dismissed(|_| ZOOM_TOAST.with_borrow_mut(|t| *t = None));
+            ZOOM_TOAST.with_borrow_mut(|t| *t = Some(toast.downgrade()));
+            ctx.toasts.add_toast(toast);
+        }
+    }
 }
 
 /// Off means onify's own animations and transitions are skipped; on follows
@@ -820,13 +956,20 @@ pub fn check_liked(uri: &str) {
             if ctx.bar.track_uri() == uri {
                 ctx.bar.set_liked(liked);
             }
+            track_row::set_known_liked([uri], liked);
         }
     });
 }
 
+/// Saves a song to (or removes it from) Liked Songs, from the player or a
+/// song row; both show the change at once.
 pub fn set_liked(uri: &str, liked: bool) {
     let Some(api) = ctx().api() else { return };
     let uri = uri.to_owned();
+    if ctx().bar.track_uri() == uri {
+        ctx().bar.set_liked(liked);
+    }
+    track_row::set_known_liked([uri.clone()], liked);
     spawn_local(async move {
         let track = uri.clone();
         let result = rt::spawn(async move { api.set_liked(&track, liked).await }).await;
@@ -841,10 +984,70 @@ pub fn set_liked(uri: &str, liked: bool) {
                 if ctx.bar.track_uri() == uri {
                     ctx.bar.set_liked(!liked);
                 }
+                track_row::set_known_liked([uri.clone()], !liked);
                 toast(&format!("Couldn't update Liked Songs: {e}"));
             }
         }
     });
+}
+
+/// Last time's song in the player, paused where it was, ready to play.
+fn show_last_played() {
+    let Some(last) = crate::resume::load() else { return };
+    let ctx = ctx();
+    ctx.bar.set_resumable(&last.now, last.position_ms);
+    ctx.backdrop.set_cover(last.now.cover(300));
+    ctx.now.replace(Some(last.now.clone()));
+    integrations::track_changed(&last.now);
+    integrations::paused(last.position_ms);
+    ctx.last_played.replace(Some(last));
+}
+
+/// Play with nothing loaded: the song from last time where it was left
+/// (once connected), else whatever Spotify last played on any device.
+pub fn resume_or_take_over() {
+    let ctx = ctx();
+    let Some(engine) = ctx.engine.borrow().clone() else {
+        ctx.resume_pending.set(ctx.last_played.borrow().is_some());
+        return;
+    };
+    let last = ctx.last_played.borrow();
+    match last.as_ref() {
+        Some(last) if last.now.uri == ctx.bar.track_uri() => {
+            engine.resume(&last.now.uri, last.context.as_ref(), ctx.bar.position_ms());
+        }
+        _ => engine.take_over(),
+    }
+}
+
+/// Saves the playing song and how far in it is, for next time.
+fn remember(position_ms: u32) {
+    let ctx = ctx();
+    let Some(now) = ctx.now.borrow().clone() else { return };
+    let mut last = ctx.last_played.borrow_mut();
+    let context = ctx.engine.borrow().as_ref().and_then(|e| e.context()).or_else(|| {
+        // Not started from onify (picked up from another device): keep what
+        // was known for this song.
+        last.as_ref().filter(|l| l.now.uri == now.uri).and_then(|l| l.context.clone())
+    });
+    let remembered = crate::resume::LastPlayed { now, position_ms, context };
+    crate::resume::save(&remembered);
+    *last = Some(remembered);
+}
+
+/// While music plays, the position is saved every 10 s.
+fn remember_while_playing(playing: bool) {
+    let ctx = ctx();
+    if let Some(id) = ctx.remember_tick.take() {
+        id.remove();
+    }
+    if playing {
+        let id = glib::timeout_add_seconds_local(10, || {
+            remember(self::ctx().bar.position_ms());
+            glib::ControlFlow::Continue
+        });
+        ctx.remember_tick.replace(Some(id));
+    }
 }
 
 fn connect(credentials: Credentials) {
@@ -869,12 +1072,22 @@ fn connect(credentials: Credentials) {
         match started {
             Ok(engine) => {
                 ctx.reconnect_attempts.set(0);
+                engine.set_crossfade(ctx.settings.borrow().crossfade);
                 let first = ctx.api.borrow().is_none();
                 ctx.api.replace(Some(Api::new(engine.session.clone())));
                 ctx.engine.replace(Some(engine));
                 ctx.root.set_visible_child_name("main");
                 if first {
                     load_library();
+                }
+                if ctx.resume_pending.take() {
+                    resume_or_take_over();
+                }
+                // Last time's song showed before there was a connection to
+                // ask whether it's liked.
+                let shown = ctx.bar.track_uri();
+                if shown.starts_with("spotify:track:") {
+                    check_liked(&shown);
                 }
             }
             Err(e) => {
@@ -1053,6 +1266,7 @@ fn handle_event(event: Event) {
             ctx.now.replace(Some(now.clone()));
             integrations::track_changed(&now);
             lyrics::track_changed(&now.uri);
+            remember(0);
         }
         Event::Playing { position_ms } => {
             ctx.bar.set_playing(true, position_ms);
@@ -1069,8 +1283,11 @@ fn handle_event(event: Event) {
             }
             integrations::playing(position_ms);
             lyrics::resync();
+            remember_while_playing(true);
         }
         Event::Paused { position_ms } => {
+            remember_while_playing(false);
+            remember(position_ms);
             ctx.bar.set_playing(false, position_ms);
             ctx.window.set_title(Some("onify"));
             integrations::paused(position_ms);
@@ -1084,6 +1301,11 @@ fn handle_event(event: Event) {
         }
         Event::Loading => {}
         Event::Stopped => {
+            remember_while_playing(false);
+            // Playback moved to another device, which the player shows now.
+            if devices::is_remote() {
+                return;
+            }
             ctx.bar.stopped();
             ctx.window.set_title(Some("onify"));
             integrations::paused(0);
@@ -1144,6 +1366,8 @@ fn handle_event(event: Event) {
                 reconnect();
             }
         }
+        Event::Devices(info) => devices::changed(info),
+        Event::RemoteTrack(now) => devices::show_remote_track(now),
         Event::NotPremium(generation) => {
             if generation == ctx.generation.get() {
                 logout();
@@ -1163,7 +1387,29 @@ fn nudge_volume(delta: f64) {
 }
 
 pub fn seek_to(ms: i64) {
-    ctx().with_engine(|e| e.seek(ms.max(0) as u32));
+    if devices::is_remote() {
+        devices::seek(ms.max(0) as u32);
+    } else {
+        ctx().with_engine(|e| e.seek(ms.max(0) as u32));
+    }
+}
+
+/// Next song, here or on the device that's playing.
+pub fn next() {
+    if devices::is_remote() {
+        devices::command("skip_next", serde_json::json!({}));
+    } else {
+        ctx().with_engine(|e| e.next());
+    }
+}
+
+/// Previous song (or the start of this one), here or on the device playing.
+pub fn prev() {
+    if devices::is_remote() {
+        devices::command("skip_prev", serde_json::json!({}));
+    } else {
+        ctx().with_engine(|e| e.prev());
+    }
 }
 
 fn install_actions(app: &adw::Application) {
@@ -1174,14 +1420,31 @@ fn install_actions(app: &adw::Application) {
         app.add_action(&a);
     };
     action("search", || navigate(Route::Search, true));
+    // Ctrl+F finds in the open playlist, album or Liked Songs; elsewhere it
+    // goes to Search.
+    action("find", || {
+        let page = ctx().nav.visible_page();
+        if !page.is_some_and(|p| pages::find_on(&p)) {
+            navigate(Route::Search, true);
+        }
+    });
     action("play-pause", play_pause);
-    action("next", || ctx().with_engine(|e| e.next()));
-    action("prev", || ctx().with_engine(|e| e.prev()));
+    action("next", next);
+    action("prev", prev);
     action("volume-up", || nudge_volume(0.05));
     action("volume-down", || nudge_volume(-0.05));
     action("logout", logout);
     action("lyrics", toggle_lyrics);
     action("preferences", || preferences::present(&ctx().window));
+    action("toggle-sidebar", || {
+        let collapsed = !ctx().settings.borrow().sidebar_collapsed;
+        ctx().settings.borrow_mut().sidebar_collapsed = collapsed;
+        ctx().settings.borrow().save();
+        apply_rail();
+    });
+    action("zoom-in", || step_zoom(1));
+    action("zoom-out", || step_zoom(-1));
+    action("zoom-reset", || step_zoom(0));
     action("quit", quit);
     action("about", || {
         let about = adw::AboutDialog::builder()
@@ -1229,10 +1492,25 @@ fn install_actions(app: &adw::Application) {
             navigate(route, true);
         });
         with_string("dev-update", |_| updater::update_now());
+        // Scrolls the visible page top to bottom in 4 s and logs frame times.
+        with_string("dev-scroll", |_| dev_scroll());
         with_string("dev-volume", |_| ctx().bar.show_volume_pop());
+        with_string("dev-devices", |_| log::warn!("dev-devices: {}", devices::describe()));
         with_string("dev-shuffle", |_| ctx().bar.toggle_shuffle());
         // Plays a playlist or album from the top, as its Play button does.
         with_string("dev-play-context", |uri| ctx().with_engine(|e| e.play_context(uri, None, None)));
+        // Finds in the open list, as typing after Ctrl+F would.
+        with_string("dev-find", |query| {
+            let Some(page) = ctx().nav.visible_page() else { return };
+            if pages::find_on(&page) {
+                let entry = gtk::prelude::GtkWindowExt::focus(&ctx().window)
+                    .and_then(|f| f.ancestor(gtk::SearchEntry::static_type()))
+                    .and_downcast::<gtk::SearchEntry>();
+                if let Some(entry) = entry {
+                    entry.set_text(query);
+                }
+            }
+        });
         with_string("dev-search", |query| {
             navigate(Route::Search, true);
             ctx().search.entry.set_text(query);
@@ -1241,7 +1519,8 @@ fn install_actions(app: &adw::Application) {
             // A widget paintable only fills in on the next redraw, so ask for
             // one and save a moment later.
             let window = ctx().window.clone();
-            let content = window.content().unwrap_or_else(|| window.clone().upcast());
+            // The whole window, so dialogs (Preferences) show too.
+            let content: gtk::Widget = window.clone().upcast();
             let paintable = gtk::WidgetPaintable::new(Some(&content));
             content.queue_draw();
             let path = path.to_owned();
@@ -1282,13 +1561,18 @@ fn install_actions(app: &adw::Application) {
         });
     });
 
-    app.set_accels_for_action("app.search", &["<Ctrl>k", "<Ctrl>l", "<Ctrl>f"]);
+    app.set_accels_for_action("app.search", &["<Ctrl>k", "<Ctrl>l"]);
+    app.set_accels_for_action("app.find", &["<Ctrl>f"]);
     app.set_accels_for_action("app.next", &["<Ctrl>Right"]);
     app.set_accels_for_action("app.prev", &["<Ctrl>Left"]);
     app.set_accels_for_action("app.volume-up", &["<Ctrl>Up"]);
     app.set_accels_for_action("app.volume-down", &["<Ctrl>Down"]);
     app.set_accels_for_action("app.quit", &["<Ctrl>q"]);
     app.set_accels_for_action("app.preferences", &["<Ctrl>comma"]);
+    app.set_accels_for_action("app.toggle-sidebar", &["<Ctrl>b"]);
+    app.set_accels_for_action("app.zoom-in", &["<Ctrl>plus", "<Ctrl>equal", "<Ctrl>KP_Add"]);
+    app.set_accels_for_action("app.zoom-out", &["<Ctrl>minus", "<Ctrl>KP_Subtract"]);
+    app.set_accels_for_action("app.zoom-reset", &["<Ctrl>0", "<Ctrl>KP_0"]);
 }
 
 /// Space plays/pauses from anywhere except while typing.
@@ -1311,6 +1595,77 @@ fn install_keys(window: &adw::ApplicationWindow) {
         glib::Propagation::Stop
     });
     window.add_controller(keys);
+
+    // Ctrl + mouse wheel zooms, like a browser.
+    let wheel = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
+    wheel.set_propagation_phase(gtk::PropagationPhase::Capture);
+    wheel.connect_scroll(|wheel, _, dy| {
+        let ctrl = wheel.current_event_state().contains(gdk::ModifierType::CONTROL_MASK);
+        if !ctrl || wheel.unit() != gdk::ScrollUnit::Wheel || dy == 0.0 {
+            return glib::Propagation::Proceed;
+        }
+        step_zoom(if dy < 0.0 { 1 } else { -1 });
+        glib::Propagation::Stop
+    });
+    window.add_controller(wheel);
+}
+
+/// Developer aid: how smoothly the visible page scrolls, as frame times.
+fn dev_scroll() {
+    fn find_scroller(widget: &gtk::Widget) -> Option<gtk::ScrolledWindow> {
+        if let Some(s) = widget.downcast_ref::<gtk::ScrolledWindow>() {
+            if s.vadjustment().upper() > s.vadjustment().page_size() {
+                return Some(s.clone());
+            }
+        }
+        let mut child = widget.first_child();
+        while let Some(c) = child {
+            if let Some(found) = find_scroller(&c) {
+                return Some(found);
+            }
+            child = c.next_sibling();
+        }
+        None
+    }
+    let Some(page) = ctx().nav.visible_page() else { return };
+    let Some(scroller) = find_scroller(page.upcast_ref()) else {
+        log::warn!("dev-scroll: nothing to scroll");
+        return;
+    };
+    let adj = scroller.vadjustment();
+    let (from, to) = (adj.lower(), (adj.upper() - adj.page_size()).min(adj.lower() + 6000.0));
+    let start = Rc::new(Cell::new(0i64));
+    let times: Rc<RefCell<Vec<i64>>> = Rc::default();
+    scroller.add_tick_callback(move |scroller, clock| {
+        let now = clock.frame_time();
+        if start.get() == 0 {
+            start.set(now);
+        }
+        times.borrow_mut().push(now);
+        let t = ((now - start.get()) as f64 / 4_000_000.0).min(1.0);
+        scroller.vadjustment().set_value(from + (to - from) * t);
+        if t < 1.0 {
+            return glib::ControlFlow::Continue;
+        }
+        let times = times.borrow();
+        let mut gaps: Vec<i64> = times.windows(2).map(|w| w[1] - w[0]).collect();
+        gaps.sort_unstable();
+        let n = gaps.len().max(1);
+        let mean = gaps.iter().sum::<i64>() as f64 / n as f64;
+        let p95 = gaps.get(n * 95 / 100).copied().unwrap_or(0);
+        let worst = gaps.last().copied().unwrap_or(0);
+        let refresh = clock.refresh_info(now).0;
+        let slow = gaps.iter().filter(|&&g| refresh > 0 && g as f64 > refresh as f64 * 1.5).count();
+        log::warn!(
+            "dev-scroll: {n} frames, {:.1} fps, mean {:.2} ms, p95 {:.2} ms, worst {:.2} ms, {slow} late (refresh {:.2} ms)",
+            1e6 / mean,
+            mean / 1000.0,
+            p95 as f64 / 1000.0,
+            worst as f64 / 1000.0,
+            refresh as f64 / 1000.0
+        );
+        glib::ControlFlow::Break
+    });
 }
 
 pub fn raise() {
@@ -1322,6 +1677,9 @@ pub fn raise() {
 /// the dialog instead and onify would keep running (which stalled updates).
 pub fn quit() {
     let ctx = ctx();
+    if ctx.bar.is_playing() {
+        remember(ctx.bar.position_ms());
+    }
     ctx.generation.set(ctx.generation.get() + 1);
     ctx.window.set_visible(false);
     #[cfg(windows)]

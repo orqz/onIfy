@@ -6,6 +6,7 @@
 mod api;
 mod audio;
 mod covers;
+mod discord;
 mod images;
 mod local;
 mod memory;
@@ -13,6 +14,7 @@ mod memory;
 mod media_controls;
 #[cfg(target_os = "linux")]
 mod mpris;
+mod resume;
 mod rt;
 mod settings;
 mod spotify;

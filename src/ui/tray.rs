@@ -102,8 +102,8 @@ fn picked(id: &MenuId) {
     });
     match pick {
         Some(Pick::PlayPause) => super::play_pause(),
-        Some(Pick::Next) => ctx().with_engine(|e| e.next()),
-        Some(Pick::Previous) => ctx().with_engine(|e| e.prev()),
+        Some(Pick::Next) => super::next(),
+        Some(Pick::Previous) => super::prev(),
         Some(Pick::Show) => super::raise(),
         Some(Pick::Quit) => super::quit(),
         None => {}

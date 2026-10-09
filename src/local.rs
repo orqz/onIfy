@@ -128,5 +128,6 @@ fn probe(path: &Path, ext: &str) -> Option<Track> {
         playable: true,
         number,
         plays: 0,
+        position: 0,
     })
 }

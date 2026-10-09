@@ -39,8 +39,8 @@ pub async fn start() -> Option<Rc<Player>> {
             ui::play_pause();
         }
     });
-    player.connect_next(|_| ctx().with_engine(|e| e.next()));
-    player.connect_previous(|_| ctx().with_engine(|e| e.prev()));
+    player.connect_next(|_| ui::next());
+    player.connect_previous(|_| ui::prev());
     player.connect_seek(|_, offset| {
         ui::seek_to(ctx().bar.position_ms() as i64 + offset.as_millis());
     });

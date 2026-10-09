@@ -44,6 +44,8 @@ pub struct Parts {
     inline_plays: gtk::Label,
     album: gtk::Label,
     plays: gtk::Label,
+    /// Shown on hover (always once liked): save to or remove from Liked Songs.
+    like: gtk::Button,
     duration: gtk::Label,
 }
 
@@ -101,6 +103,47 @@ thread_local! {
     static NOW_PLAYING: RefCell<String> = const { RefCell::new(String::new()) };
     /// Play counts fetched for selected songs, by URI.
     static PLAYS: RefCell<std::collections::HashMap<String, u64>> = RefCell::default();
+    /// Whether songs are in Liked Songs, as far as onify knows, by URI.
+    static LIKED: RefCell<std::collections::HashMap<String, bool>> = RefCell::default();
+    /// Songs whose liked state is being asked for.
+    static ASKING_LIKED: RefCell<std::collections::HashSet<String>> = RefCell::default();
+}
+
+/// Notes that songs are (or aren't) in Liked Songs and updates their rows.
+pub fn set_known_liked(uris: impl IntoIterator<Item = String>, liked: bool) {
+    let uris: Vec<String> = uris.into_iter().collect();
+    LIKED.with_borrow_mut(|known| {
+        for uri in &uris {
+            known.insert(uri.clone(), liked);
+        }
+    });
+    ROWS.with_borrow(|rows| {
+        for row in rows.iter().filter_map(|r| r.upgrade()) {
+            if row.track().is_some_and(|t| uris.contains(&t.uri)) {
+                row.refresh_like();
+            }
+        }
+    });
+}
+
+/// Asks Spotify whether a song is liked, once, when its row is first hovered.
+fn want_liked(uri: &str) {
+    if !uri.starts_with("spotify:track:") || LIKED.with_borrow(|l| l.contains_key(uri)) {
+        return;
+    }
+    if !ASKING_LIKED.with_borrow_mut(|asking| asking.insert(uri.to_owned())) {
+        return;
+    }
+    let Some(api) = super::ctx().api() else { return };
+    let uri = uri.to_owned();
+    glib::spawn_future_local(async move {
+        let asked = uri.clone();
+        let liked = crate::rt::spawn(async move { api.is_liked(&asked).await }).await;
+        ASKING_LIKED.with_borrow_mut(|asking| asking.remove(&uri));
+        if let Ok(liked) = liked {
+            set_known_liked([uri], liked);
+        }
+    });
 }
 
 /// Shows a selected song's play count, asking Spotify for it if its list
@@ -215,6 +258,17 @@ pub fn popup_menu(popover: &gtk::PopoverMenu, menu: &gio::Menu, x: f64, y: f64) 
     popover.popup();
 }
 
+/// A small round button on a song row, shown while it's hovered.
+fn row_action(icon: &str, tooltip: &str) -> gtk::Button {
+    let button = gtk::Button::from_icon_name(icon);
+    button.add_css_class("row-action");
+    button.add_css_class("flat");
+    button.set_size_request(28, 28);
+    button.set_valign(gtk::Align::Center);
+    button.set_tooltip_text(Some(tooltip));
+    button
+}
+
 fn dim(label: &gtk::Label) -> &gtk::Label {
     label.add_css_class("dim-label");
     label
@@ -315,13 +369,32 @@ impl TrackRow {
         let plays = plays_label();
         row.append(&plays);
 
+        let like = row_action("onify-heart-symbolic", "Save to Liked Songs");
+        row.append(&like);
         let duration = duration_label();
         row.append(&duration);
+        let more = row_action("onify-view-more-symbolic", "More");
+        row.append(&more);
 
         play.connect_clicked(glib::clone!(
             #[weak]
             row,
             move |_| row.play()
+        ));
+        like.connect_clicked(glib::clone!(
+            #[weak]
+            row,
+            move |_| row.toggle_like()
+        ));
+        more.connect_clicked(glib::clone!(
+            #[weak]
+            row,
+            move |more| {
+                // Under the button, as if it had been right-clicked there.
+                if let Some(point) = more.compute_point(&row, &gtk::graphene::Point::new(more.width() as f32 / 2.0, more.height() as f32)) {
+                    row.show_menu(point.x() as f64, point.y() as f64);
+                }
+            }
         ));
         let _ = row.imp().parts.set(Parts {
             lead,
@@ -335,6 +408,7 @@ impl TrackRow {
             inline_plays,
             album,
             plays,
+            like,
             duration,
         });
 
@@ -347,6 +421,9 @@ impl TrackRow {
             move |_, _, _| {
                 row.imp().hovered.set(true);
                 row.refresh_playing();
+                if let Some(track) = row.track() {
+                    want_liked(&track.uri);
+                }
                 let weak = row.downgrade();
                 let id = glib::timeout_add_local_once(PRELOAD_AFTER, move || {
                     HOVER.with_borrow_mut(|h| h.take());
@@ -426,6 +503,30 @@ impl TrackRow {
         };
         self.show_plays(plays);
         self.refresh_playing();
+        self.refresh_like();
+    }
+
+    /// The heart: filled and lit once liked; only Spotify songs have one.
+    fn refresh_like(&self) {
+        let parts = self.imp().parts.get().unwrap();
+        let Some(uri) = self.track().map(|t| t.uri) else { return };
+        let spotify = uri.starts_with("spotify:track:");
+        let liked = LIKED.with_borrow(|l| l.get(&uri).copied().unwrap_or(false));
+        parts.like.set_sensitive(spotify);
+        parts.like.set_opacity(if spotify { 1.0 } else { 0.0 });
+        parts.like.set_icon_name(if liked { "onify-heart-filled-symbolic" } else { "onify-heart-symbolic" });
+        parts.like.set_tooltip_text(Some(if liked { "Remove from Liked Songs" } else { "Save to Liked Songs" }));
+        if liked {
+            parts.like.add_css_class("liked");
+        } else {
+            parts.like.remove_css_class("liked");
+        }
+    }
+
+    fn toggle_like(&self) {
+        let Some(uri) = self.track().map(|t| t.uri) else { return };
+        let liked = !LIKED.with_borrow(|l| l.get(&uri).copied().unwrap_or(false));
+        super::set_liked(&uri, liked);
     }
 
     /// Fills in the play count (0 for none); CSS shows it for the selected row.
@@ -582,6 +683,8 @@ pub fn column_header(mode: RowMode) -> gtk::Box {
     if let Some(plays) = &plays {
         header.append(plays);
     }
+    // Room for the rows' heart and menu buttons on either side of Time.
+    header.append(&gtk::Box::builder().width_request(28).build());
     // As wide as a row's duration: same label, same font, never shown. (The
     // caption's own smaller font made it narrower, shifting the Album column.)
     let time = gtk::Stack::new();
@@ -591,6 +694,7 @@ pub fn column_header(mode: RowMode) -> gtk::Box {
     time.add_child(&heading);
     time.set_visible_child(&heading);
     header.append(&time);
+    header.append(&gtk::Box::builder().width_request(28).build());
     header
 }
 
@@ -631,19 +735,26 @@ pub fn factory(mode: RowMode, header: gtk::Widget) -> gtk::SignalListItemFactory
         }
         row.set_visible(true);
         row.set_position(item.position());
-        let number = if mode == RowMode::Album {
-            object.borrow::<Track>().number
-        } else {
-            item.position()
+        let number = match mode {
+            RowMode::Album => object.borrow::<Track>().number,
+            _ => object.borrow::<Track>().position,
         };
         row.bind(&object, number);
     });
     factory
 }
 
-/// Wraps tracks as list model items.
-pub fn objects(tracks: Vec<Track>) -> Vec<glib::BoxedAnyObject> {
-    tracks.into_iter().map(glib::BoxedAnyObject::new).collect()
+/// Wraps tracks as list model items, numbered on from `after` (the songs
+/// already listed), so they keep their numbers while a find narrows the list.
+pub fn objects(tracks: Vec<Track>, after: u32) -> Vec<glib::BoxedAnyObject> {
+    tracks
+        .into_iter()
+        .zip(after + 1..)
+        .map(|(mut track, position)| {
+            track.position = position;
+            glib::BoxedAnyObject::new(track)
+        })
+        .collect()
 }
 
 /// A short, non-virtualized list of songs (search results, top tracks).

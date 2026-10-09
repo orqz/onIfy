@@ -221,6 +221,13 @@ impl<'ct> ConnectState {
         Ok(Some(self.current_track(|t| t)))
     }
 
+    /// onify: whether Previous has a song to go back to.
+    pub fn has_prev_track(&self) -> bool {
+        self.prev_tracks()
+            .iter()
+            .any(|t| !t.uid.starts_with(IDENTIFIER_DELIMITER))
+    }
+
     pub fn current_track<F: Fn(&'ct MessageField<ProvidedTrack>) -> R, R>(
         &'ct self,
         access: F,

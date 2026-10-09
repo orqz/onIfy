@@ -13,7 +13,13 @@ impl ConnectState {
         self.set_shuffle(shuffle);
 
         if shuffle {
-            return self.shuffle_new();
+            // onify: turning shuffle on keeps what played before, so
+            // Previous still goes back to the last song.
+            let history = self.prev_tracks().clone();
+            self.shuffle_new()?;
+            self.set_prev_tracks(history);
+            self.update_restrictions();
+            return Ok(());
         }
 
         self.reset_context(ResetContext::DefaultIndex);
