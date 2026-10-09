@@ -8,9 +8,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 
-/// onify's own Discord application, used when no other is set. Empty until
-/// one is registered (discord.com/developers, named "onify").
-pub const ONIFY_APP: &str = "";
+/// onify's own Discord application (discord.com/developers, named "onify",
+/// with an "onify" art asset), so presence needs no setting up.
+pub const ONIFY_APP: &str = "1558162192652701707";
 
 /// What the status line under your name shows while listening.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

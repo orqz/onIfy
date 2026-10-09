@@ -130,15 +130,15 @@ fn playback_group() -> adw::PreferencesGroup {
 }
 
 fn discord_group() -> adw::PreferencesGroup {
-    use crate::discord::{ONIFY_APP, StatusShows};
+    use crate::discord::StatusShows;
     let group = adw::PreferencesGroup::builder()
         .title("Discord")
-        .description("Shows what you're playing on your Discord profile, local files included. Spotify's own Discord connection works too; turn one off if both show.")
+        .description("Shows what you're playing on your Discord profile, local files included, with nothing to set up. If Spotify is also connected to your Discord, both may show.")
         .build();
     let shared = ctx();
-    let (enabled, app_id, status) = {
+    let (enabled, status) = {
         let settings = shared.settings.borrow();
-        (settings.discord, settings.discord_app_id.clone(), StatusShows::from_name(&settings.discord_status))
+        (settings.discord, StatusShows::from_name(&settings.discord_status))
     };
     let show = switch("Show on Discord", "Listening to… with the cover, artist and time left", enabled, |on| {
         ctx().settings.borrow_mut().discord = on;
@@ -161,37 +161,7 @@ fn discord_group() -> adw::PreferencesGroup {
     });
     group.add(&shows);
 
-    let id = adw::EntryRow::builder()
-        .title(if ONIFY_APP.is_empty() { "Application ID" } else { "Application ID (empty for onify's)" })
-        .text(app_id.as_str())
-        .show_apply_button(true)
-        .input_purpose(gtk::InputPurpose::Digits)
-        .build();
-    id.connect_apply(|row| {
-        ctx().settings.borrow_mut().discord_app_id = row.text().trim().to_owned();
-        save();
-        super::integrations::discord_settings_changed();
-    });
-    group.add(&id);
-    for row in [shows.upcast_ref::<gtk::Widget>(), id.upcast_ref()] {
-        show.bind_property("active", row, "sensitive").sync_create().build();
-    }
-    if ONIFY_APP.is_empty() {
-        let help = adw::ActionRow::builder()
-            .title("Get an Application ID")
-            .subtitle("Create an application named onify at discord.com/developers and paste its ID above")
-            .activatable(true)
-            .build();
-        help.add_suffix(&gtk::Image::from_icon_name("onify-go-next-symbolic"));
-        help.connect_activated(|_| {
-            gtk::UriLauncher::new("https://discord.com/developers/applications").launch(
-                None::<&gtk::Window>,
-                gtk::gio::Cancellable::NONE,
-                |_| {},
-            );
-        });
-        group.add(&help);
-    }
+    show.bind_property("active", &shows, "sensitive").sync_create().build();
     group
 }
 

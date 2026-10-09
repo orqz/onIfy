@@ -41,6 +41,11 @@
     <control>pointing</control>
   </recommends>
   <releases>
+    <release version="0.1.4.0" date="2026-10-09">
+      <description>
+        <p>Crossfade, a device picker that shows and controls what plays on your other devices, the last song ready to play at startup, zoom, a collapsible sidebar, find in playlists, like and menu buttons on songs, latest and popular releases on artist pages, arrows on Home, Discord presence, the system's own font, smooth wheel scrolling, Previous twice goes back a song, and ARM builds.</p>
+      </description>
+    </release>
     <release version="0.1.3.2" date="2026-10-08">
       <description>
         <p>Skipping a paused song plays the next one, Previous on the first song starts it over instead of stopping, Copy Song Link works everywhere (it copied "album" from the player), right-clicking the playing song opens its menu, Windows gets smooth wheel scrolling and its own font (Adwaita Sans), and onify is spelled onify everywhere.</p>

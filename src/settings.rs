@@ -28,7 +28,8 @@ pub struct Settings {
     pub crossfade: u32,
     /// Discord: show what's playing on your profile through onify itself.
     pub discord: bool,
-    /// The Discord application presence shows as; empty for onify's own.
+    /// A Discord application to show presence as instead of onify's own
+    /// (only set by hand in settings.json).
     pub discord_app_id: String,
     /// What Discord's status line shows: "song", "artist" or "app".
     pub discord_status: String,
@@ -71,7 +72,7 @@ impl Settings {
             zoom: v["zoom"].as_f64().unwrap_or(1.0).clamp(ZOOM_MIN, ZOOM_MAX),
             sidebar_collapsed: v["sidebar_collapsed"].as_bool().unwrap_or(false),
             crossfade: v["crossfade"].as_u64().unwrap_or(0).min(12) as u32,
-            discord: v["discord"].as_bool().unwrap_or(false),
+            discord: v["discord"].as_bool().unwrap_or(true),
             discord_app_id: text("discord_app_id"),
             discord_status: text("discord_status"),
             animations: v["animations"].as_bool().unwrap_or(true),
