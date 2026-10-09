@@ -149,7 +149,7 @@ fn discord_group() -> adw::PreferencesGroup {
     let labels: Vec<&str> = StatusShows::ALL.iter().map(|s| s.label()).collect();
     let shows = adw::ComboRow::builder()
         .title("Status Shows")
-        .subtitle("What \"Listening to\" names under your profile")
+        .subtitle("What \"Listening to\" says under your name")
         .model(&gtk::StringList::new(&labels))
         .selected(StatusShows::ALL.iter().position(|s| *s == status).unwrap_or(0) as u32)
         .build();

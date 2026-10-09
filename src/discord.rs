@@ -11,21 +11,23 @@ use serde_json::{Value, json};
 /// onify's own Discord application (discord.com/developers, named "onify",
 /// with an "onify" art asset), so presence needs no setting up.
 pub const ONIFY_APP: &str = "1558162192652701707";
+/// Where "Get onify" on the presence card leads.
+const HOME: &str = "https://github.com/orqz/onify";
 
 /// What the status line under your name shows while listening.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum StatusShows {
     /// "Listening to <song>"
-    #[default]
     Song,
     /// "Listening to <artist>"
     Artist,
-    /// "Listening to <app name>"
+    /// "Listening to onify", like Spotify's own "Listening to Spotify"
+    #[default]
     App,
 }
 
 impl StatusShows {
-    pub const ALL: [StatusShows; 3] = [StatusShows::Song, StatusShows::Artist, StatusShows::App];
+    pub const ALL: [StatusShows; 3] = [StatusShows::App, StatusShows::Song, StatusShows::Artist];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -43,7 +45,7 @@ impl StatusShows {
         match self {
             StatusShows::Song => "Song",
             StatusShows::Artist => "Artist",
-            StatusShows::App => "App name",
+            StatusShows::App => "onify",
         }
     }
 
@@ -195,14 +197,24 @@ fn activity(p: &Presence) -> Value {
     if !p.album.is_empty() {
         activity["assets"]["large_text"] = json!(clip(&p.album));
     }
-    // Local files have no link, and Discord rejects empty URLs.
+    // Anyone looking at the card can get onify; the song opens on Spotify
+    // (local files have no link, and Discord rejects empty URLs).
+    let mut buttons = vec![json!({ "label": "Get onify", "url": HOME })];
     if !p.track_url.is_empty() {
         activity["details_url"] = json!(p.track_url);
-        activity["buttons"] = json!([{ "label": "Open in Spotify", "url": p.track_url }]);
+        buttons.push(json!({ "label": "Play on Spotify", "url": p.track_url }));
     }
-    // Without a cover link (local files), the app's own "onify" image, if
-    // its Discord application has one.
-    activity["assets"]["large_image"] = json!(p.cover.as_deref().unwrap_or("onify"));
+    activity["buttons"] = json!(buttons);
+    // The cover, with onify's logo in its corner; local files (no cover
+    // link) show the logo itself.
+    match &p.cover {
+        Some(cover) => {
+            activity["assets"]["large_image"] = json!(cover);
+            activity["assets"]["small_image"] = json!("onify");
+            activity["assets"]["small_text"] = json!("onify");
+        }
+        None => activity["assets"]["large_image"] = json!("onify"),
+    }
     if let Some(url) = &p.artist_url {
         activity["state_url"] = json!(url);
     }
